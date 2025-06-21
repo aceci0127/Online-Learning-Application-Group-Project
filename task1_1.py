@@ -1,179 +1,169 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy import stats
+from scipy.stats import truncnorm
 
 class Environment:
-    def __init__(self):
-        pass
-
     def round(self, a_t):
-        pass
+        raise NotImplementedError
 
 class PricingEnvironment(Environment):
-    def __init__(self, prices, T):
-        self.prices = prices  # Array of allowed prices P = {p1, p2, ..., pm}
-        self.m = len(prices)  # Number of price arms
-        self.valuations = np.random.normal(0.8, 0.2, size=T)
-        self.valuations = np.clip(self.valuations, 0, 1)  # Ensure valuations are in [0, 1]
+    def __init__(self, prices, T, rng=None, mu=0.8, sigma=0.2):
+        """
+        prices: array of allowed prices
+        T: horizon
+        rng: numpy RandomState or Generator for reproducibility
+        mu, sigma: parameters of the underlying normal before truncation
+        """
+        self.prices = np.array(prices)
+        self.m = len(prices)
+        self.T = T
         self.t = 0
 
+        # set up RNG
+        if rng is None:
+            rng = np.random.default_rng()
+        self._rng = rng
+
+        # compute truncation bounds for scipy’s truncnorm
+        a, b = (0 - mu) / sigma, (1 - mu) / sigma
+        # draw truly truncated Normal(mu, sigma^2) on [0,1]
+        self.valuations = truncnorm(a, b, loc=mu, scale=sigma).rvs(
+            size=T, random_state=rng
+        )
+
     def round(self, arm_index):
-        # arm_index is the index of the chosen price in self.prices
         chosen_price = self.prices[arm_index]
-        # Revenue is chosen_price if buyer accepts (v_t >= price), 0 otherwise
-        revenue = chosen_price if self.valuations[self.t] >= chosen_price else 0
+        v = self.valuations[self.t]
+        revenue = chosen_price if v >= chosen_price else 0.0
         self.t += 1
         return revenue
 
 class Agent:
-    def __init__(self):
-        pass
     def pull_arm(self):
-        pass
+        raise NotImplementedError
     def update(self, r_t):
-        pass
+        raise NotImplementedError
 
 class UCB1PricingAgent(Agent):
     def __init__(self, prices, T):
-        self.prices = prices  # Array of allowed prices
-        self.m = len(prices)  # Number of price arms
+        self.prices = np.array(prices)
+        self.m = len(prices)
         self.T = T
-        self.t = 0  # Current round (0-indexed)
-        
-        # UCB1 state variables
-        self.N_pulls = np.zeros(self.m)  # n_i(t): number of times each price tried
-        self.cumulative_revenue = np.zeros(self.m)  # S_i(t): cumulative revenue per price
-        self.average_rewards = np.zeros(self.m)  # mu_hat_i(t): empirical average reward
-        
+        self.t = 0  # rounds completed
+
+        # statistics
+        self.N_pulls = np.zeros(self.m, dtype=int)
+        self.cumulative_revenue = np.zeros(self.m, dtype=float)
+        self.average_rewards = np.zeros(self.m, dtype=float)
         self.chosen_arm = None
-    
+
     def pull_arm(self):
-        # Initialization phase: try each price once
+        # explore each arm once
         if self.t < self.m:
             self.chosen_arm = self.t
         else:
-            # Compute UCB values for each arm
-            ucb_values = np.zeros(self.m)
+            ucb_vals = np.zeros(self.m)
             for i in range(self.m):
                 if self.N_pulls[i] > 0:
-                    confidence_width = np.sqrt(2 * np.log(self.T) / self.N_pulls[i])
-                    ucb_values[i] = self.average_rewards[i] + confidence_width
+                    # use log(self.t) so bonus shrinks over time
+                    bonus = np.sqrt(2 * np.log(self.t) / self.N_pulls[i])
+                    ucb_vals[i] = self.average_rewards[i] + bonus
                 else:
-                    ucb_values[i] = float('inf')  # Unvisited arms get highest priority
-            
-            # Choose arm with highest UCB value
-            self.chosen_arm = np.argmax(ucb_values)
-        
+                    ucb_vals[i] = np.inf
+            self.chosen_arm = np.argmax(ucb_vals)
         return self.chosen_arm
-    
+
     def update(self, revenue):
-        # Update statistics for the chosen arm
         arm = self.chosen_arm
         self.N_pulls[arm] += 1
         self.cumulative_revenue[arm] += revenue
         self.average_rewards[arm] = self.cumulative_revenue[arm] / self.N_pulls[arm]
         self.t += 1
 
-# Compute expected revenues for each price
-def compute_expected_revenues(prices, mu=0.8, sigma=0.2, lower=0, upper=1):
+def compute_expected_revenues(prices, mu=0.8, sigma=0.2, lower=0., upper=1.):
     """
-    Compute expected revenue for each price given truncated normal valuations.
-    
-    Args:
-        prices: array of candidate prices
-        mu, sigma: parameters of the underlying normal distribution
-        lower, upper: truncation bounds
+    Compute E[p * 1{V>=p}] for V ~ TruncNorm(mu, sigma^2) on [lower, upper].
     """
-    expected_revenues = []
-    
+    a, b = (lower - mu) / sigma, (upper - mu) / sigma
+    dist = truncnorm(a, b, loc=mu, scale=sigma)
+    revs = []
     for p in prices:
-        # For truncated normal, P(V >= p) = (1 - CDF_truncated(p))
-        # Use scipy.stats.truncnorm for truncated normal distribution
-        
-        # Standardize the bounds for truncnorm
-        a = (lower - mu) / sigma  # standardized lower bound
-        b = (upper - mu) / sigma  # standardized upper bound
-        
-        # Create truncated normal distribution
-        truncated_norm = stats.truncnorm(a, b, loc=mu, scale=sigma)
-        
-        # P(V >= p) = 1 - CDF(p)
-        prob_accept = 1 - truncated_norm.cdf(p)
-        
-        # Expected revenue = price × probability of acceptance
-        expected_revenue = p * prob_accept
-        expected_revenues.append(expected_revenue)
-    
-    return np.array(expected_revenues)
+        prob_accept = 1.0 - dist.cdf(p)
+        revs.append(p * prob_accept)
+    return np.array(revs)
 
-prices = np.array([0.1, 0.3, 0.5, 0.7, 0.9])
-m = len(prices)
-T = 10000
-seed = 18
 
-expected_revenues = compute_expected_revenues(prices)
-best_price_index = np.argmax(expected_revenues)
-best_price = prices[best_price_index]
+if __name__ == "__main__":
+    # parameters
+    prices = [0.2 , 0.3 , 0.4 , 0.6, 0.7, 0.8]
+    T = 100_000
+    seed = 18
+    n_trials = 10
 
-print(f'Prices: {prices}')
-print(f'Expected revenues: {expected_revenues}')
-print(f'Best price: {best_price} (index {best_price_index})')
+    # analytic benchmark (clairvoyant)
+    expected_revenues = compute_expected_revenues(prices)
+    best_idx = np.argmax(expected_revenues)
+    best_price = prices[best_idx]
+    print("Prices:", prices)
+    print("Expected revenues:", np.round(expected_revenues, 6))
+    print(f"Clairvoyant best price: {best_price} (idx {best_idx})\n")
 
-expected_clairvoyant_rewards = np.repeat(expected_revenues[best_price_index], T)
+    # simulate
+    np.random.seed(seed)
+    all_regrets = []
+    for trial in range(n_trials):
+        # new RNG per trial for both env and reproducibility
+        rng = np.random.RandomState(seed + trial)
+        env = PricingEnvironment(prices, T, rng=rng)
+        agent = UCB1PricingAgent(prices, T)
 
-n_trials = 10
-regret_per_trial = []
+        regrets = []
+        cum_regret = 0.0
+        for t in range(T):
+            arm = agent.pull_arm()
+            r = env.round(arm)
+            agent.update(r)
 
-np.random.seed(seed)
-for trial in range(n_trials):
-    env = PricingEnvironment(prices, T)
-    ucb_agent = UCB1PricingAgent(prices, T)
+            # instantaneous regret = clairvoyant reward − actual
+            instant_regret = expected_revenues[best_idx] - r
+            cum_regret += instant_regret
+            regrets.append(cum_regret)
 
-    agent_rewards = np.array([])
+        all_regrets.append(regrets)
 
-    for t in range(T):
-        a_t = ucb_agent.pull_arm()
-        r_t = env.round(a_t)
-        ucb_agent.update(r_t)
+    all_regrets = np.array(all_regrets)
+    avg_regret = all_regrets.mean(axis=0)
+    sd_regret = all_regrets.std(axis=0)
 
-        agent_rewards = np.append(agent_rewards, r_t)
+    # plot
+    plt.figure(figsize=(12, 4))
 
-    cumulative_regret = np.cumsum(expected_clairvoyant_rewards - agent_rewards)
-    regret_per_trial.append(cumulative_regret)
+    plt.subplot(1, 2, 1)
+    plt.plot(avg_regret, label="Average Cumulative Regret")
+    plt.fill_between(
+        np.arange(T),
+        avg_regret - sd_regret / np.sqrt(n_trials),
+        avg_regret + sd_regret / np.sqrt(n_trials),
+        alpha=0.3,
+        label="±1 SE"
+    )
+    plt.xlabel("t")
+    plt.ylabel("Cumulative Regret")
+    plt.title("UCB1 Pricing: Cumulative Regret")
+    plt.legend()
 
-regret_per_trial = np.array(regret_per_trial)
+    plt.subplot(1, 2, 2)
+    labels = [f"{p:.1f}" for p in prices]
+    plt.barh(labels, agent.N_pulls)
+    plt.xlabel("Number of Pulls")
+    plt.ylabel("Price")
+    plt.title("Final Allocation of Pulls")
 
-average_regret = regret_per_trial.mean(axis=0)
-regret_sd = regret_per_trial.std(axis=0)
+    plt.tight_layout()
+    plt.show()
 
-plt.figure(figsize=(12, 4))
-
-# Plot cumulative regret
-plt.subplot(1, 2, 1)
-plt.plot(np.arange(T), average_regret, label='Average Regret')
-plt.title('Cumulative Regret of UCB1 Pricing')
-plt.fill_between(np.arange(T),
-                average_regret - regret_sd / np.sqrt(n_trials),
-                average_regret + regret_sd / np.sqrt(n_trials),
-                alpha=0.3,
-                label='Uncertainty')
-plt.xlabel('$t$')
-plt.ylabel('Cumulative Regret')
-plt.legend()
-
-# Plot number of pulls per price
-plt.subplot(1, 2, 2)
-price_labels = [f'{p:.1f}' for p in prices]
-plt.barh(y=price_labels, width=ucb_agent.N_pulls)
-plt.title('Number of Pulls per Price (UCB1 Pricing)')
-plt.xlabel('Number of Pulls')
-plt.ylabel('Price')
-
-plt.tight_layout()
-plt.show()
-
-print(f"\nFinal Results:")
-print(f"Average regret per round: {average_regret[-1]/T:.4f}")
-print(f"Final empirical average revenues: {ucb_agent.average_rewards}")
-print(f"Number of times each price was chosen: {ucb_agent.N_pulls}")
-print(f"True expected revenues: {expected_revenues}")
+    print("\nFinal Results:")
+    print(f"Average regret per round: {avg_regret[-1]/T:.4f}")
+    print("Empirical average revenues:", np.round(agent.average_rewards, 4))
+    print("Pull counts:", agent.N_pulls)
+    print("True expected revenues:", np.round(expected_revenues, 4))
