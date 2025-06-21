@@ -63,6 +63,7 @@ class ConstrainedUCBPricingAgent:
         return f_ucb, c_lcb
     
     def select_distribution(self, f_ucb, c_lcb, remaining_budget):
+        ####THIS iS WRONG, FIX IT
         rhs = remaining_budget / (self.T - self.t) if self.T > self.t else 0.0
         c = -f_ucb  # linprog minimizes
         A = np.vstack([c_lcb, np.ones(self.m)])
@@ -119,6 +120,7 @@ def compute_true_clairvoyant(T, B, prices, mu=0.8, sigma=0.2):
       opt_per_round  -- expected revenue per round = f_true^T γ_opt
       clairvoyant_total -- T * opt_per_round
     """
+    ### THIS IS WRONG, FIX IT
     f_true, c_true = compute_expected_revenues_truncnorm(prices, mu, sigma)
     m = len(prices)
 
