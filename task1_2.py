@@ -1,200 +1,167 @@
 import numpy as np
 from scipy.stats import truncnorm
-from scipy.optimize import linprog
+from scipy import optimize
 import matplotlib.pyplot as plt
 
 
 class BudgetedPricingEnvironment:
-    def __init__(self, prices, T, budget, mu=0.8, sigma=0.2, rng=None):
+    def __init__(self, prices, T, rng=None):
         self.prices = np.array(prices)
         self.T = T
-        self.B = budget
-        self.remaining_budget = budget
         self.t = 0
         
         if rng is None:
             rng = np.random.default_rng()
         self.rng = rng
-        
+        '''
         # truncated normal valuations
         a, b = (0 - mu) / sigma, (1 - mu) / sigma
         self.vals = truncnorm(a, b, loc=mu, scale=sigma).rvs(size=T, random_state=rng)
+        '''
+        self.vals = rng.uniform(0, 1, size=T)  # uniform valuations for simplicity
     
     def round(self, price_index):
         p = self.prices[price_index]
         sale = self.vals[self.t] >= p
         reward = p if sale else 0.0
         cost = 1.0 if sale else 0.0
-        if sale:
-            self.remaining_budget -= 1
         self.t += 1
         return reward, cost
 
 class ConstrainedUCBPricingAgent:
-    def __init__(self, prices, T, B, alpha=1.0, rng=None):
-        self.prices = np.array(prices)
-        self.m = len(prices)
+    def __init__(self, K, B, T, range=1):
+        self.K = K
         self.T = T
-        self.B = B
-        
-        # statistics
-        self.counts = np.zeros(self.m, dtype=int)
-        self.sum_reward = np.zeros(self.m, dtype=float)
-        self.sum_cost = np.zeros(self.m, dtype=float)
+        self.range = range
+        self.a_t = None # it's an index, not the actual bid
+        self.avg_f = np.zeros(K)
+        self.avg_c = np.zeros(K)
+        self.N_pulls = np.zeros(K)
+        self.budget = B
+        self.rho = B/T
         self.t = 0
-        
-        self.alpha = alpha
-        
-        if rng is None:
-            rng = np.random.default_rng()
-        self.rng = rng
     
-    def estimate_bounds(self):
-        f_ucb = np.full(self.m, np.inf)
-        c_lcb = np.full(self.m, -np.inf)
-        for i in range(self.m):
-            n = self.counts[i]
-            if n > 0:
-                mu_r = self.sum_reward[i] / n
-                mu_c = self.sum_cost[i] / n
-                bonus = self.alpha * np.log(self.t +1) / n
-                f_ucb[i] = mu_r + bonus
-                c_lcb[i] = mu_c - bonus
-        return f_ucb, c_lcb
-    
-    def select_distribution(self, f_ucb, c_lcb, remaining_budget):
-        ####THIS iS WRONG, FIX IT
-        rhs = remaining_budget / (self.T - self.t) if self.T > self.t else 0.0
-        c = -f_ucb  # linprog minimizes
-        A = np.vstack([c_lcb, np.ones(self.m)])
-        b = np.array([rhs, 1.0])
-        bounds = [(0, 1) for _ in range(self.m)]
-        res = linprog(c, A_ub=A, b_ub=b, bounds=bounds, method='highs')
-        
-        
-        if res.success:
-            return res.x
+    def pull_arm(self):
+        if self.budget < 1:
+            print("Budget exhausted, cannot pull any more arms.")
+            self.a_t = None
+            return None
+        if self.t < self.K:
+            self.a_t = self.t 
         else:
-            return np.ones(self.m) / self.m
+            f_ucbs = self.avg_f + self.range*np.sqrt(2*np.log(self.T)/self.N_pulls)
+            c_lcbs = self.avg_c - self.range*np.sqrt(2*np.log(self.T)/self.N_pulls)
+            gamma_t = self.compute_opt(f_ucbs, c_lcbs)
+            self.a_t = np.random.choice(self.K, p=gamma_t)
+        return self.a_t
+
+    def compute_opt(self, f_ucbs, c_lcbs):
+        if np.sum(c_lcbs <= np.zeros(len(c_lcbs))):
+            gamma = np.zeros(len(f_ucbs))
+            gamma[np.argmax(f_ucbs)] = 1
+            return gamma
+        c = -f_ucbs
+        A_ub = [c_lcbs]
+        b_ub = [self.rho]
+        A_eq = [np.ones(self.K)]
+        b_eq = [1]
+        res = optimize.linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=(0,1))
+        gamma = res.x
+        return gamma
     
-    def pull_arm(self, env):
-        if self.t < self.m:
-            return self.t  # initialize
-        f_ucb, c_lcb = self.estimate_bounds()
-        gamma = self.select_distribution(f_ucb, c_lcb, env.remaining_budget)
-        return self.rng.choice(self.m, p=gamma)
-    
-    def update(self, arm, reward, cost):
-        self.counts[arm] += 1
-        self.sum_reward[arm] += reward
-        self.sum_cost[arm] += cost
+    def update(self, f_t, c_t):
+        self.N_pulls[self.a_t] += 1
+        self.avg_f[self.a_t] += (f_t - self.avg_f[self.a_t])/self.N_pulls[self.a_t]
+        self.avg_c[self.a_t] += (c_t - self.avg_c[self.a_t])/self.N_pulls[self.a_t]
+        self.budget -= c_t
         self.t += 1
 
 import numpy as np
 from scipy.stats import truncnorm
-from scipy.optimize import linprog
 
-def compute_expected_revenues_truncnorm(prices, mu=0.8, sigma=0.2, lower=0., upper=1.):
-    """
-    Compute:
-      f_true[p] = E[p * 1{V>=p}]
-      c_true[p] = E[1{V>=p}]
-    for V ~ TruncNorm(mu, sigma^2) on [lower, upper].
-    """
-    a, b = (lower - mu) / sigma, (upper - mu) / sigma
-    dist = truncnorm(a, b, loc=mu, scale=sigma)
 
-    f_true = np.array([p * (1 - dist.cdf(p)) for p in prices])
-    c_true = np.array([(1 - dist.cdf(p))       for p in prices])
-    return f_true, c_true
+## Linear Program
+def compute_clairvoyant(available_prices, rho, sell_probabilities):
+    c = -(available_prices)*sell_probabilities
+    A_ub = [available_prices*sell_probabilities]
+    b_ub = [rho]
+    A_eq = [np.ones(len(available_prices))]
+    b_eq = [1]
+    res = optimize.linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=(0,1))
+    gamma = res.x
+    
+    return gamma, -res.fun
 
-def compute_true_clairvoyant(T, B, prices, mu=0.8, sigma=0.2):
-    """
-    Solves the LP:
-      max   f_true^T γ
-      s.t.  c_true^T γ <= B / T
-            sum(γ) = 1, γ >= 0
 
-    Returns:
-      γ_opt          -- optimal mixing over prices
-      opt_per_round  -- expected revenue per round = f_true^T γ_opt
-      clairvoyant_total -- T * opt_per_round
-    """
-    ### THIS IS WRONG, FIX IT
-    f_true, c_true = compute_expected_revenues_truncnorm(prices, mu, sigma)
-    m = len(prices)
 
-    # We minimize -f_true^T γ
-    c_lp = -f_true
-    # Constraints: c_true^T γ <= B/T  and  sum(γ)=1
-    A_ub = np.vstack([c_true])
-    b_ub = np.array([B/T])
-
-    A_eq = np.ones((1, m))
-    b_eq = np.array([1.0])
-
-    res = linprog(
-    c_lp,
-    A_ub=A_ub, b_ub=b_ub,
-    A_eq=A_eq, b_eq=b_eq,
-    bounds=[(0,1)]*m,
-    method='highs'
-    )
-    if not res.success:
-        raise RuntimeError("LP solver failed to find clairvoyant distribution.")
-
-    gamma_opt = res.x
-    opt_per_round = f_true.dot(gamma_opt)
-    clairvoyant_total = T * opt_per_round
-
-    return gamma_opt, opt_per_round, clairvoyant_total
+    
 
 if __name__ == "__main__":
     # Example parameters
-    prices = np.array([0.2, 0.3, 0.4, 0.6, 0.7, 0.8])
-    T = 100_000
-    B = 30_000
-    mu, sigma = 0.8, 0.2
+    prices = np.array([0.2, 0.5,0.6, 0.8])
+    T = 10_000
+    B = 5_000
     seed = 18
 
-    gamma_opt, opt_per_round, clairvoyant_total = compute_true_clairvoyant(
-        T, B, prices, mu, sigma
-    )
+    sell_probabilities = 1-prices
+    print("sell_probabilities:", sell_probabilities)
+    expected_reward = prices * sell_probabilities
+    print("expected_reward:", expected_reward)
 
-    print("Prices:", prices)
-    print(f"Budget B = {B}, Horizon T = {T}\n")
-    print("Clairvoyant optimal distribution γ:")
-    for p, weight in zip(prices, gamma_opt):
-        print(f"  Price {p:.1f}: γ = {weight:.4f}")
-    print(f"\nOPT per round (expected revenue): {opt_per_round:.6f}")
-    print(f"Total clairvoyant reward (T * OPT): {clairvoyant_total:.2f}")
+    gamma, expected_clairvoyant_utility = compute_clairvoyant(prices,B/T,sell_probabilities)
+    print(gamma)
     n_trials = 10
     # simulate
     np.random.seed(seed)
     all_regrets = []
+    all_units_sold = []
     for trial in range(n_trials):
         # new RNG per trial for both env and reproducibility
         rng = np.random.RandomState(seed + trial)
-        env = PricingEnvironment(prices, T, rng=rng)
-        agent = UCB1PricingAgent(prices, T)
+        env = BudgetedPricingEnvironment(prices, T, rng=rng)
+        agent = ConstrainedUCBPricingAgent(len(prices), B, T, range=1)
 
         regrets = []
+        units_sold = []
         cum_regret = 0.0
+        cum_unit_sold = 0
         for t in range(T):
             arm = agent.pull_arm()
-            r = env.round(arm)
-            agent.update(r)
+            if arm is None:
+                break
+            reward,sold = env.round(arm)
+            agent.update(reward,sold)
 
             # instantaneous regret = clairvoyant reward − actual
-            instant_regret = expected_revenues[best_idx] - r
+            instant_regret = expected_clairvoyant_utility - reward
             cum_regret += instant_regret
+            cum_unit_sold += sold
             regrets.append(cum_regret)
+            units_sold.append(cum_unit_sold)
+            
 
         all_regrets.append(regrets)
+        all_units_sold.append(units_sold)
 
+    '''
+    min_rounds = min(len(reg) for reg in all_regrets)
+    all_regrets_fixed = np.array([reg[:min_rounds] for reg in all_regrets])
+    all_units_sold_fixed = np.array([us[:min_rounds] for us in all_units_sold])
+
+    avg_regret = all_regrets_fixed.mean(axis=0)
+    sd_regret = all_regrets_fixed.std(axis=0)
+
+    avg_units_sold = all_units_sold_fixed.mean(axis=0)
+    sd_units_sold = all_units_sold_fixed.std(axis=0)
+    '''
     all_regrets = np.array(all_regrets)
+    all_units_sold = np.array(all_units_sold)
+    
     avg_regret = all_regrets.mean(axis=0)
     sd_regret = all_regrets.std(axis=0)
+    
+    avg_units_sold = all_units_sold.mean(axis=0)
+    sd_units_sold = all_units_sold.std(axis=0)
 
     # plot
     plt.figure(figsize=(12, 4))
@@ -223,9 +190,32 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
+    # plot cumulative units sold
+    import matplotlib.ticker as ticker
+
+    plt.figure(figsize=(12, 4))
+    ax = plt.gca()
+    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter('%.2f'))
+    plt.plot(avg_units_sold, label="Average Cumulative Units Sold")
+    plt.fill_between(
+        np.arange(len(avg_units_sold)),
+        avg_units_sold - sd_units_sold / np.sqrt(n_trials),
+        avg_units_sold + sd_units_sold / np.sqrt(n_trials),
+        alpha=0.3,
+        label="±1 SE"
+    )
+    plt.xlabel("t")
+    plt.ylabel("Cumulative Units Sold")
+    plt.title("Cumulative Units Sold Over Time")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    # Print average cumulative units sold at the final round
+    print(f"Average cumulative units sold: {avg_units_sold[-1]:.2f}")
+
     print("\nFinal Results:")
     print(f"Average regret per round: {avg_regret[-1]/T:.4f}")
-    print("Empirical average revenues:", np.round(agent.average_rewards, 4))
     print("Pull counts:", agent.N_pulls)
-    print("True expected revenues:", np.round(expected_revenues, 4))
+
 

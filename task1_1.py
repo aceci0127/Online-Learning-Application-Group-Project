@@ -23,13 +23,7 @@ class PricingEnvironment(Environment):
         if rng is None:
             rng = np.random.default_rng()
         self._rng = rng
-
-        # compute truncation bounds for scipy’s truncnorm
-        a, b = (0 - mu) / sigma, (1 - mu) / sigma
-        # draw truly truncated Normal(mu, sigma^2) on [0,1]
-        self.valuations = truncnorm(a, b, loc=mu, scale=sigma).rvs(
-            size=T, random_state=rng
-        )
+        self.valuations = self._rng.uniform(0, 1, size=T)
 
     def round(self, arm_index):
         chosen_price = self.prices[arm_index]
@@ -45,39 +39,26 @@ class Agent:
         raise NotImplementedError
 
 class UCB1PricingAgent(Agent):
-    def __init__(self, prices, T):
-        self.prices = np.array(prices)
-        self.m = len(prices)
+    def __init__(self, K, T, range=1):
+        self.K = K
         self.T = T
-        self.t = 0  # rounds completed
-
-        # statistics
-        self.N_pulls = np.zeros(self.m, dtype=int)
-        self.cumulative_revenue = np.zeros(self.m, dtype=float)
-        self.average_rewards = np.zeros(self.m, dtype=float)
-        self.chosen_arm = None
-
+        self.range = range
+        self.a_t = None
+        self.average_rewards = np.zeros(K)
+        self.N_pulls = np.zeros(K)
+        self.t = 0
+    
     def pull_arm(self):
-        # explore each arm once
-        if self.t < self.m:
-            self.chosen_arm = self.t
+        if self.t < self.K:
+            self.a_t = self.t 
         else:
-            ucb_vals = np.zeros(self.m)
-            for i in range(self.m):
-                if self.N_pulls[i] > 0:
-                    # use log(self.t) so bonus shrinks over time
-                    bonus = np.sqrt(2 * np.log(self.t) / self.N_pulls[i])
-                    ucb_vals[i] = self.average_rewards[i] + bonus
-                else:
-                    ucb_vals[i] = np.inf
-            self.chosen_arm = np.argmax(ucb_vals)
-        return self.chosen_arm
-
-    def update(self, revenue):
-        arm = self.chosen_arm
-        self.N_pulls[arm] += 1
-        self.cumulative_revenue[arm] += revenue
-        self.average_rewards[arm] = self.cumulative_revenue[arm] / self.N_pulls[arm]
+            ucbs = self.average_rewards + self.range*np.sqrt(2*np.log(self.T)/self.N_pulls)
+            self.a_t = np.argmax(ucbs)
+        return self.a_t
+    
+    def update(self, r_t):
+        self.N_pulls[self.a_t] += 1
+        self.average_rewards[self.a_t] += (r_t - self.average_rewards[self.a_t])/self.N_pulls[self.a_t]
         self.t += 1
 
 def compute_expected_revenues(prices, mu=0.8, sigma=0.2, lower=0., upper=1.):
@@ -95,13 +76,13 @@ def compute_expected_revenues(prices, mu=0.8, sigma=0.2, lower=0., upper=1.):
 
 if __name__ == "__main__":
     # parameters
-    prices = [0.2 , 0.3 , 0.4 , 0.6, 0.7, 0.8]
+    prices = np.array([0.2 , 0.3 , 0.4 , 0.6, 0.7, 0.8])
     T = 100_000
     seed = 18
     n_trials = 10
 
-    # analytic benchmark (clairvoyant)
-    expected_revenues = compute_expected_revenues(prices)
+    ## clairvoyant solution
+    expected_revenues = prices * (1 - prices)
     best_idx = np.argmax(expected_revenues)
     best_price = prices[best_idx]
     print("Prices:", prices)
@@ -115,7 +96,7 @@ if __name__ == "__main__":
         # new RNG per trial for both env and reproducibility
         rng = np.random.RandomState(seed + trial)
         env = PricingEnvironment(prices, T, rng=rng)
-        agent = UCB1PricingAgent(prices, T)
+        agent = UCB1PricingAgent(len(prices), T)
 
         regrets = []
         cum_regret = 0.0
