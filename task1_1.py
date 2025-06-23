@@ -7,7 +7,7 @@ class Environment:
         raise NotImplementedError
 
 class PricingEnvironment(Environment):
-    def __init__(self, prices, T, rng=None, mu=0.8, sigma=0.2):
+    def __init__(self, prices, T, rng=None):
         """
         prices: array of allowed prices
         T: horizon
@@ -52,7 +52,7 @@ class UCB1PricingAgent(Agent):
         if self.t < self.K:
             self.a_t = self.t 
         else:
-            ucbs = self.average_rewards + self.range*np.sqrt(2*np.log(self.T)/self.N_pulls)
+            ucbs = self.average_rewards + self.range*np.sqrt(2*np.log(self.t)/self.N_pulls)
             self.a_t = np.argmax(ucbs)
         return self.a_t
     
@@ -76,10 +76,10 @@ def compute_expected_revenues(prices, mu=0.8, sigma=0.2, lower=0., upper=1.):
 
 if __name__ == "__main__":
     # parameters
-    prices = np.array([0.2 , 0.3 , 0.4 , 0.6, 0.7, 0.8])
-    T = 100_000
+    prices = np.array([0.1 , 0.2 , 0.3 , 0.5, 0.7, 0.8])
+    T = 150_000
     seed = 18
-    n_trials = 10
+    n_trials = 20
 
     ## clairvoyant solution
     expected_revenues = prices * (1 - prices)
