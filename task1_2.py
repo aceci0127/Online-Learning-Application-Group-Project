@@ -125,7 +125,7 @@ if __name__ == "__main__":
     prices = np.array([0.2, 0.6 , 0.9 , 1.001]) #1 is dummy
     
     T = 10_000
-    B = 2_000
+    B = 1_500
     seed = 18
 
     sell_probabilities = np.maximum(0, 1-prices)
@@ -237,6 +237,8 @@ if __name__ == "__main__":
     print("Pull counts:", agent.N_pulls)
     final_reward = np.array(final_reward)
     print("Average cum reward:", np.mean(final_reward))
+    basline_reward = expected_clairvoyant_utility * T
+    print(f"Baseline reward: {basline_reward:.2f}")
     
     
 
