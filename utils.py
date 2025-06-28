@@ -1,0 +1,274 @@
+import numpy as np
+from scipy.optimize import linprog
+from scipy.stats import truncnorm
+import matplotlib.pyplot as plt
+
+
+def compute_expected_revenues(prices, mu=0.8, sigma=0.2, lower=0., upper=1.):
+    """
+    Calcola E[p * 1{V>=p}] per V ~ TruncNorm(mu, sigma^2) su [lower, upper].
+    """
+    a, b = (lower - mu) / sigma, (upper - mu) / sigma
+    dist = truncnorm(a, b, loc=mu, scale=sigma)
+    revs = []
+    for p in prices:
+        prob_accept = 1.0 - dist.cdf(p)
+        revs.append(p * prob_accept)
+    return np.array(revs)
+
+
+def compute_clairvoyant_single_product(prices, sell_probabilities, budget, horizon):
+    """
+    Calcola la soluzione chiarveggente per singolo prodotto usando LP.
+
+    Args:
+        prices: array dei prezzi disponibili
+        sell_probabilities: probabilità di vendita per ogni prezzo
+        budget: budget totale
+        horizon: orizzonte temporale
+
+    Returns:
+        expected_utility: utilità attesa per round
+        gamma: distribuzione ottimale sui prezzi
+        expected_cost: costo atteso per round
+    """
+    rho = budget / horizon
+
+    c = -(prices * sell_probabilities)
+    A_ub = [sell_probabilities]
+    b_ub = [rho]
+    A_eq = [np.ones(len(prices))]
+    b_eq = [1]
+
+    res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=(0, 1))
+
+    if not res.success:
+        raise ValueError("LP fallito: " + res.message)
+
+    gamma = res.x
+    expected_utility = -res.fun
+    expected_cost = np.sum(sell_probabilities * gamma)
+
+    return expected_utility, gamma, expected_cost
+
+
+def compute_sell_probabilities_multi(V, prices):
+    """
+    Calcola le probabilità di vendita per più prodotti.
+
+    Args:
+        V: array di valutazioni (T, m)
+        prices: array dei prezzi
+
+    Returns:
+        s: matrice delle probabilità di vendita (m, K)
+    """
+    T_env, m_env = V.shape
+    K = len(prices)
+    s = np.zeros((m_env, K))
+
+    for j in range(m_env):
+        for i, p in enumerate(prices):
+            s[j, i] = np.sum(V[:, j] >= p) / T_env
+
+    return s
+
+
+def compute_extended_clairvoyant(V, prices, total_inventory):
+    """
+    Calcola la soluzione chiarveggente estesa per multi-prodotto.
+
+    Args:
+        V: valutazioni (T, m)
+        prices: array dei prezzi
+        total_inventory: inventario totale
+
+    Returns:
+        expected_utility: utilità chiarveggente attesa per round
+        gamma: distribuzione ottimale (m, K)
+        expected_cost: costo atteso per round
+    """
+    T_env, m_env = V.shape
+    K = len(prices)
+    pacing_rate = total_inventory / T_env
+
+    s = compute_sell_probabilities_multi(V, prices)
+
+    # Appiattisce variabili nella formulazione LP
+    c = -(np.tile(prices, m_env) * s.flatten())
+    A_ub = np.array([s.flatten()])
+    b_ub = np.array([pacing_rate])
+
+    A_eq = []
+    b_eq = []
+    for j in range(m_env):
+        eq = np.zeros(m_env * K)
+        eq[j*K:(j+1)*K] = 1
+        A_eq.append(eq)
+        b_eq.append(1)
+
+    A_eq = np.array(A_eq)
+    b_eq = np.array(b_eq)
+    bounds = [(0, 1)] * (m_env * K)
+
+    res = linprog(c, A_ub=A_ub, b_ub=b_ub,
+                  A_eq=A_eq, b_eq=b_eq,
+                  bounds=bounds, method="highs")
+
+    if not res.success:
+        raise ValueError("LP fallito: " + res.message)
+
+    gamma = res.x.reshape((m_env, K))
+    expected_utility = -res.fun
+    expected_cost = np.dot(s.flatten(), res.x)
+
+    return expected_utility, gamma, expected_cost
+
+
+def compute_clairvoyant_sequence(valuations, prices, budget):
+    """
+    Calcola la sequenza di prezzi chiarveggente dato conoscenza completa delle valutazioni.
+
+    Args:
+        valuations: array delle valutazioni
+        prices: prezzi disponibili
+        budget: budget massimo (unità massime vendibili)
+
+    Returns:
+        price_sequence: sequenza di prezzi da postare
+        total_revenue: ricavo totale
+    """
+    prices = np.sort(prices)
+    T = len(valuations)
+    candidate = np.empty(T)
+
+    # Per ogni round, calcola il miglior prezzo che non supera la valutazione
+    for t, v in enumerate(valuations):
+        allowed = prices[prices <= v]
+        if allowed.size > 0:
+            candidate[t] = allowed[-1]
+        else:
+            candidate[t] = -np.inf
+
+    # Seleziona B round con ricavo candidato più alto
+    sorted_indices = np.argsort(candidate)[::-1]
+    selected = np.zeros(T, dtype=bool)
+    count = 0
+
+    for i in sorted_indices:
+        if candidate[i] > -np.inf and count < budget:
+            selected[i] = True
+            count += 1
+        else:
+            selected[i] = False
+
+    # Per round selezionati, carica il prezzo candidato; altrimenti, imposta prezzo dummy
+    dummy_price = prices[-1] + 1
+    price_sequence = [candidate[t] if selected[t]
+                      else dummy_price for t in range(T)]
+    total_revenue = sum(candidate[t] for t in range(T) if selected[t])
+
+    return price_sequence, total_revenue
+
+
+def plot_results(regrets_data, units_data, n_trials, title_prefix=""):
+    """
+    Crea grafici per i risultati degli esperimenti.
+
+    Args:
+        regrets_data: dati del regret cumulativo
+        units_data: dati delle unità vendute cumulative
+        n_trials: numero di trial
+        title_prefix: prefisso per i titoli
+    """
+    min_rounds = min(len(reg) for reg in regrets_data)
+    regrets_arr = np.array([reg[:min_rounds] for reg in regrets_data])
+    units_arr = np.array([us[:min_rounds] for us in units_data])
+
+    avg_regret = regrets_arr.mean(axis=0)
+    se_regret = regrets_arr.std(axis=0) / np.sqrt(n_trials)
+
+    avg_units = units_arr.mean(axis=0)
+    se_units = units_arr.std(axis=0) / np.sqrt(n_trials)
+
+    plt.figure(figsize=(12, 4))
+
+    # Plot regret cumulativo
+    plt.subplot(1, 2, 1)
+    plt.plot(avg_regret, label="Regret Cumulativo Medio")
+    plt.fill_between(np.arange(min_rounds),
+                     avg_regret - se_regret,
+                     avg_regret + se_regret,
+                     alpha=0.3, label="±1 SE")
+    plt.xlabel("Round")
+    plt.ylabel("Regret Cumulativo")
+    plt.title(f"{title_prefix}Regret Cumulativo")
+    plt.legend()
+
+    # Plot unità vendute cumulative
+    plt.subplot(1, 2, 2)
+    plt.plot(avg_units, label="Unità Vendute Cumulative Medie")
+    plt.fill_between(np.arange(min_rounds),
+                     avg_units - se_units,
+                     avg_units + se_units,
+                     alpha=0.3, label="±1 SE")
+    plt.xlabel("Round")
+    plt.ylabel("Unità Vendute Cumulative")
+    plt.title(f"{title_prefix}Unità Vendute Cumulative")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    return avg_regret, avg_units, min_rounds
+
+
+def print_final_results(avg_regret, avg_units, min_rounds, final_rewards, agent=None):
+    """
+    Stampa i risultati finali dell'esperimento.
+
+    Args:
+        avg_regret: regret medio
+        avg_units: unità medie vendute
+        min_rounds: numero minimo di round
+        final_rewards: ricavi finali
+        agent: agente (opzionale, per statistiche aggiuntive)
+    """
+    print(f"\nRisultati Finali:")
+    print(f"Regret medio per round: {avg_regret[-1]/min_rounds:.4f}")
+    print(f"Unità vendute cumulative medie: {avg_units[-1]:.2f}")
+
+    if final_rewards:
+        final_rewards = np.array(final_rewards)
+        print(f"Ricavo cumulativo medio: {np.mean(final_rewards):.2f}")
+
+    if agent and hasattr(agent, 'N_pulls'):
+        print(f"Conteggi pull: {agent.N_pulls}")
+    elif agent and hasattr(agent, 'pull_counts'):
+        print(f"Conteggi pull: {agent.pull_counts}")
+
+
+def create_default_prices():
+    """Crea array di prezzi di default per gli esperimenti"""
+    return np.array([0.2, 0.256, 0.311, 0.367, 0.422, 0.478,
+                     0.533, 0.589, 0.644, 0.7, 0.756, 0.811,
+                     0.867, 0.922, 0.98, 1.001])
+
+
+def create_simple_prices():
+    """Crea array di prezzi semplice per esperimenti base"""
+    return np.array([0.1, 0.2, 0.3, 0.5, 0.7, 0.8])
+
+
+def create_multiproduct_price_grid(base_prices, num_products):
+    """
+    Crea griglia di prezzi per multi-prodotto.
+
+    Args:
+        base_prices: prezzi base
+        num_products: numero di prodotti
+
+    Returns:
+        price_grid: lista di array di prezzi per ogni prodotto
+    """
+    return [base_prices.copy() for _ in range(num_products)]
