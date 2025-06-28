@@ -40,6 +40,7 @@ class ConstrainedCombinatorialUCBAgent:
         self.N = len(price_grid)
         self.Ks = [len(pg) for pg in price_grid]
         self.B_rem = B
+        self.B = B
         self.T = T
         self.t = 0
         self.alpha = alpha
@@ -115,14 +116,15 @@ class ConstrainedCombinatorialUCBAgent:
             f_j = self.avg_f[j]
             c_j = self.avg_c[j]
 
-            bonus = np.sqrt(self.alpha * np.log(self.T) / np.maximum(1, n_j))
+            bonus = np.sqrt(self.alpha * np.log(np.maximum(self.t, 1)) / np.maximum(1, n_j))
             bonus[n_j == 0] = self.T        # force exploring unseen arms
-
+            bonus[-1] = 0.0  # last dummy price has no bonus
+            
             f_ucb.append(f_j + bonus)
-            c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
+            c_lcb.append(np.clip(c_j + bonus, 0.0, 1.0))
 
         # solve LP to get marginals
-        marginals = self._solve_marginal_lp(f_ucb, c_lcb, self.B_rem / (self.T - self.t + 1) )
+        marginals = self._solve_marginal_lp(f_ucb, c_lcb, self.B / self.T )
         #print(f"Round {self.t}: marginals = {marginals}, B_rem = {self.B_rem:.2f}")
 
         # sample a joint price vector
@@ -207,20 +209,20 @@ def solve_clairvoyant_lp(price_grid, B, T):
 # ----------------------------
 if __name__ == "__main__":
     N_products = 3
-    base_prices = np.array([0.2, 0.5, 0.9])
+    base_prices = np.array([0.2 ,0.3 , 0.4, 0.5 , 0.55 , 0.6 ,0.70,0.80,0.85, 0.90,0.95,0.98]) 
     dummy_price = 1.001
     price_grid = [
     np.concatenate([base_prices, [dummy_price]])
     for _ in range(N_products)
     ]
 
-    T = 10000
-    B = 15000
+    T = 100_000
+    B = 20_000
     seed = 18
 
     clair_reward ,simplex = solve_clairvoyant_lp(price_grid, B, T)
     print(f"Clairvoyant expected reward per round: {clair_reward:.4f} and simplex: {simplex}")
-    n_trials = 10
+    n_trials = 1
     all_regrets, all_units = [], []
 
     for trial in range(n_trials):

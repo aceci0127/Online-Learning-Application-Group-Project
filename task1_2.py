@@ -1,11 +1,11 @@
 import numpy as np
-from scipy.stats import truncnorm
+from scipy.stats import truncnorm , beta
 from scipy import optimize
 import matplotlib.pyplot as plt
 
 
 class BudgetedPricingEnvironment:
-    def __init__(self, prices, T, rng=None):
+    def __init__(self, prices, T, distribution = 'uniform' , rng=None):
         self.prices = np.array(prices)
         self.T = T
         self.t = 0
@@ -18,7 +18,14 @@ class BudgetedPricingEnvironment:
         a, b = (0 - mu) / sigma, (1 - mu) / sigma
         self.vals = truncnorm(a, b, loc=mu, scale=sigma).rvs(size=T, random_state=rng)
         '''
-        self.vals = rng.uniform(0, 1, size=T)  # uniform valuations for simplicity
+        if distribution == 'beta':
+            self.alpha = 60
+            self.beta = 40
+            
+            # Generate buyer valuations with Beta distribution.
+            self.vals = beta(self.alpha, self.beta).rvs(size=T, random_state=rng)
+        elif distribution == 'uniform':
+            self.vals = rng.uniform(0, 1, size=T)  # uniform valuations for simplicity
     
     def round(self, price_index):
         p = self.prices[price_index]
@@ -37,14 +44,15 @@ class ConstrainedUCBPricingAgent:
         self.avg_f = np.zeros(K)
         self.avg_c = np.zeros(K)
         self.N_pulls = np.zeros(K)
+        self.rem_budget = B
         self.budget = B
         self.rho = B/T
         self.t = 0
     
     def pull_arm(self):
         # 1) Stop if out of budget
-        if self.budget < 1:
-            print("Budget exhausted, cannot pull any more arms.")
+        if self.rem_budget < 1:
+            #print("Budget exhausted, cannot pull any more arms.")
             self.a_t = None
             return None
 
@@ -58,12 +66,13 @@ class ConstrainedUCBPricingAgent:
 
         # 3) Build UCB/LCB for all arms
          
-        bonus = np.sqrt(2 * np.log(self.t) / self.N_pulls)  # UCB bonus)
-        
-        bonus[-1] = 0.0
-        f_ucbs = self.avg_f + self.range * bonus
-        c_lcbs = self.avg_c +  self.range * bonus
+       
+        f_ucbs = self.avg_f + self.range*np.sqrt(2*np.log(self.t)/self.N_pulls)
+        c_lcbs = self.avg_c - self.range*np.sqrt(2*np.log(self.t)/self.N_pulls)
         c_lcbs = np.clip(c_lcbs, 0.0, 1.0)
+        
+        f_ucbs[-1] = 0.0  # last dummy price has no bonus
+        c_lcbs[-1] = 0.0  # last dummy price has no bonus
 
         # 4) Solve the LP with compute_opt (returns distribution over all K arms)
         gamma_t , expected_t = self.compute_opt(f_ucbs, c_lcbs)
@@ -83,21 +92,30 @@ class ConstrainedUCBPricingAgent:
             gamma[np.argmax(f_ucbs)] = 1
             return gamma , 0.0
         '''
+        
+        
         c = -f_ucbs
         A_ub = [c_lcbs]
-        b_ub = [self.rho] #self.rho
+        b_ub = [self.rho]  # self.rem_budget / (self.T - self.t + 1)
         A_eq = [np.ones(self.K)]
         b_eq = [1]
-        res = optimize.linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=(0,1))
+        res = optimize.linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=(0, 1))
         gamma = res.x
         expected = -res.fun
-        return gamma , expected
+        
+        # Check if gamma is a valid probability distribution.
+        if not np.all(gamma >= 0):
+            raise ValueError("Invalid distribution: negative probabilities found in gamma.")
+        if not np.isclose(np.sum(gamma), 1.0):
+            raise ValueError(f"Invalid distribution: probabilities sum to {np.sum(gamma)}, expected 1.")
+
+        return gamma, expected
     
     def update(self, f_t, c_t):
         self.N_pulls[self.a_t] += 1
         self.avg_f[self.a_t] += (f_t - self.avg_f[self.a_t])/self.N_pulls[self.a_t]
         self.avg_c[self.a_t] += (c_t - self.avg_c[self.a_t])/self.N_pulls[self.a_t]
-        self.budget -= c_t
+        self.rem_budget -= c_t
         self.t += 1
 
 import numpy as np
@@ -122,20 +140,30 @@ def compute_clairvoyant(available_prices, rho, sell_probabilities):
 
 if __name__ == "__main__":
     # Example parameters
-    prices = np.array([0.2, 0.6 , 0.9 , 1.001]) #1 is dummy
+    prices = np.array([0.2, 0.256, 0.311, 0.367, 0.422, 0.478, 0.533, 0.589, 0.644, 0.7, 0.756, 0.811, 0.867, 0.922, 0.98, 1.001]) #1 is dummy
     
     T = 10_000
-    B = 1_500
+    B = 4_000
     seed = 18
-
-    sell_probabilities = np.maximum(0, 1-prices)
-    print("sell_probabilities:", sell_probabilities)
+    '''
+    #try beta
+    a, b = 60, 40  # shape parameters
+    sell_probabilities = 1 - beta.cdf(prices, a, b)
+    print("sell_probabilities with beta:", sell_probabilities)
     expected_reward = prices * sell_probabilities
     print("expected_reward:", expected_reward)
+    '''
+    
+    sell_probabilities = np.maximum(0, 1-prices)
+    print("sell_probabilities with uniform :", sell_probabilities)
+    expected_reward = prices * sell_probabilities
+    print("expected_reward:", expected_reward)
+    
+    
 
     gamma, expected_clairvoyant_utility = compute_clairvoyant(prices,B/T,sell_probabilities)
     print(f"Gamma: {gamma}, baseline expected reward: {expected_clairvoyant_utility}")
-    n_trials = 5
+    n_trials = 1
     # simulate
     
     np.random.seed(seed)
@@ -157,8 +185,10 @@ if __name__ == "__main__":
         for t in range(T):
             arm = agent.pull_arm()
             if arm is None:
-                #print(f"Trial {trial+1}: Budget exhausted at round {t}.")
-                arm = 3 # use dummy arm if budget exhausted
+                print(f"Trial {trial+1}: Budget exhausted at round {t}.")
+                arm = len(prices) - 1 # use dummy arm if budget exhausted
+                agent.a_t = arm #could be done in the agent directly
+                break
                 
             reward,sold = env.round(arm)
             agent.update(reward,sold)
@@ -239,7 +269,7 @@ if __name__ == "__main__":
     print("Average cum reward:", np.mean(final_reward))
     basline_reward = expected_clairvoyant_utility * T
     print(f"Baseline reward: {basline_reward:.2f}")
-    
-    
+
+
 
 
