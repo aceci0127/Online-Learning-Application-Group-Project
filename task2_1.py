@@ -14,7 +14,7 @@ class MultiProductPricingEnvironment:
         self.t = 0
         self.rng = rng if rng is not None else np.random.default_rng()
         self.vals = self.rng.uniform(0, 1, size=(T, self.N))
-
+    
     def round(self, price_indices):
         vs = self.vals[self.t]
         rewards = np.zeros(self.N)
