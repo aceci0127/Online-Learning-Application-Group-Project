@@ -63,21 +63,26 @@ class ConstrainedUCBPricingAgent(Agent):
         self.t = 0
 
     def pull_arm(self):
+        # 1) Stop if out of budget
         if self.rem_budget < 1:
             self.a_t = None
             return None
 
+        # 2) Pure exploration: each real arm exactly once
         if self.t < self.K:
             self.a_t = self.t
             return self.a_t
 
+        # 3) Build UCB/LCB for all arms
         f_ucbs = self.avg_f + self.range*np.sqrt(2*np.log(self.t)/self.N_pulls)
         c_lcbs = self.avg_c - self.range*np.sqrt(2*np.log(self.t)/self.N_pulls)
         c_lcbs = np.clip(c_lcbs, 0.0, 1.0)
 
+        # 4) Set the last arm to 0 for the dummy arm
         f_ucbs[-1] = 0.0
         c_lcbs[-1] = 0.0
 
+        # 5) Solve the LP
         gamma_t, expected_t = self.compute_opt(f_ucbs, c_lcbs)
         self.a_t = np.random.choice(self.K, p=gamma_t)
         return self.a_t
@@ -96,7 +101,7 @@ class ConstrainedUCBPricingAgent(Agent):
         if not np.all(gamma >= 0):
             raise ValueError(
                 "Invalid distribution: negative probabilities found in gamma.")
-        if not np.isclose(np.sum(gamma), 1.0):
+        if not np.isclose(np.sum(gamma), 1.0, atol=1e-6):
             raise ValueError(
                 f"Invalid distribution: probabilities do not sum to 1. Found {np.sum(gamma)}.")
 
@@ -109,6 +114,112 @@ class ConstrainedUCBPricingAgent(Agent):
         self.avg_c[self.a_t] += (c_t - self.avg_c[self.a_t]
                                  )/self.N_pulls[self.a_t]
         self.rem_budget -= c_t
+        self.t += 1
+
+
+class ConstrainedCombinatorialUCBAgent(Agent):
+    """Constrained Combinatorial UCB agent for multi-product"""
+
+    def __init__(self, price_grid, B, T, alpha=1):
+        self.price_grid = price_grid
+        self.N = len(price_grid)
+        self.Ks = [len(pg) for pg in price_grid]
+        self.B_rem = B
+        self.B = B
+        self.T = T
+        self.t = 0
+        self.alpha = alpha
+        self.rng = np.random.default_rng()
+
+        self.N_pulls = [np.zeros(K) for K in self.Ks]
+        self.avg_f = [np.zeros(K) for K in self.Ks]
+        self.avg_c = [np.zeros(K) for K in self.Ks]
+        self.current_choice = None
+
+    def _solve_marginal_lp(self, f_ucb, c_lcb, rho):
+        """
+        Solve the per-round LP:
+          max_x sum_j f_ucb[j]·x_j
+          s.t. ∑_k x_{j,k} = 1  ∀j,
+               ∑_{j,k} c_lcb[j][k]·x_{j,k} ≤ rho,
+               x ≥ 0.
+        Returns a list of marginals [x_0, x_1, …, x_{N-1}].
+        """
+        f_flat = np.concatenate(f_ucb)
+        c_flat = np.concatenate(c_lcb)
+        num_vars = len(f_flat)
+
+        c_obj = -f_flat
+
+        A_eq = np.zeros((self.N, num_vars))
+        b_eq = np.ones(self.N)
+        offset = 0
+        for j, K in enumerate(self.Ks):
+            A_eq[j, offset:offset+K] = 1
+            offset += K
+
+        A_ub = c_flat.reshape(1, -1)
+        b_ub = np.array([rho])
+
+        bounds = [(0, None)] * num_vars
+
+        res = linprog(c=c_obj,
+                      A_ub=A_ub, b_ub=b_ub,
+                      A_eq=A_eq, b_eq=b_eq,
+                      bounds=bounds,
+                      method='highs')
+
+        if not res.success:
+            raise RuntimeError("LP failed: " + res.message)
+
+        x_flat = res.x
+        marginals = []
+        offset = 0
+        for K in self.Ks:
+            marginals.append(x_flat[offset:offset+K])
+            offset += K
+
+        return marginals
+
+    def pull_arm(self):
+        if self.B_rem < 1 or self.t >= self.T:
+            return None
+
+        # TODO: capire quale rho è meglio usare
+        rho = self.B_rem / (self.T - self.t)
+
+        f_ucb = []
+        c_lcb = []
+        for j in range(self.N):
+            n_j = self.N_pulls[j]
+            f_j = self.avg_f[j]
+            c_j = self.avg_c[j]
+
+            bonus = np.sqrt(
+                self.alpha * np.log(np.maximum(self.t, 1)) / np.maximum(1, n_j))
+            bonus[n_j == 0] = self.T
+            bonus[-1] = 0.0
+
+            f_ucb.append(f_j + bonus)
+            c_lcb.append(np.clip(c_j + bonus, 0.0, 1.0))
+
+        marginals = self._solve_marginal_lp(f_ucb, c_lcb, self.B / self.T)
+
+        choice = tuple(
+            self.rng.choice(self.Ks[j], p=marginals[j])
+            for j in range(self.N)
+        )
+
+        self.current_choice = choice
+        return choice
+
+    def update(self, rewards, costs):
+        for j, idx in enumerate(self.current_choice):
+            self.N_pulls[j][idx] += 1
+            n = self.N_pulls[j][idx]
+            self.avg_f[j][idx] += (rewards[j] - self.avg_f[j][idx]) / n
+            self.avg_c[j][idx] += (costs[j] - self.avg_c[j][idx]) / n
+        self.B_rem -= costs.sum()
         self.t += 1
 
 
@@ -192,104 +303,6 @@ class FFPrimalDualPricingAgent(Agent):
 
         self.t += 1
         return f_t, c_t
-
-
-class ConstrainedCombinatorialUCBAgent(Agent):
-    """Constrained Combinatorial UCB agent for multi-product"""
-
-    def __init__(self, price_grid, B, T, alpha=1):
-        self.price_grid = price_grid
-        self.N = len(price_grid)
-        self.Ks = [len(pg) for pg in price_grid]
-        self.B_rem = B
-        self.B = B
-        self.T = T
-        self.t = 0
-        self.alpha = alpha
-        self.rng = np.random.default_rng()
-
-        self.N_pulls = [np.zeros(K) for K in self.Ks]
-        self.avg_f = [np.zeros(K) for K in self.Ks]
-        self.avg_c = [np.zeros(K) for K in self.Ks]
-        self.current_choice = None
-
-    def _solve_marginal_lp(self, f_ucb, c_lcb, rho):
-        """Solves the per-round marginal LP"""
-        f_flat = np.concatenate(f_ucb)
-        c_flat = np.concatenate(c_lcb)
-        num_vars = len(f_flat)
-
-        c_obj = -f_flat
-
-        A_eq = np.zeros((self.N, num_vars))
-        b_eq = np.ones(self.N)
-        offset = 0
-        for j, K in enumerate(self.Ks):
-            A_eq[j, offset:offset+K] = 1
-            offset += K
-
-        A_ub = c_flat.reshape(1, -1)
-        b_ub = np.array([rho])
-
-        bounds = [(0, None)] * num_vars
-
-        res = linprog(c=c_obj,
-                      A_ub=A_ub, b_ub=b_ub,
-                      A_eq=A_eq, b_eq=b_eq,
-                      bounds=bounds,
-                      method='highs')
-
-        if not res.success:
-            raise RuntimeError("LP failed: " + res.message)
-
-        x_flat = res.x
-        marginals = []
-        offset = 0
-        for K in self.Ks:
-            marginals.append(x_flat[offset:offset+K])
-            offset += K
-
-        return marginals
-
-    def pull_arm(self):
-        if self.B_rem < 1 or self.t >= self.T:
-            return None
-
-        rho = self.B_rem / (self.T - self.t)
-
-        f_ucb = []
-        c_lcb = []
-        for j in range(self.N):
-            n_j = self.N_pulls[j]
-            f_j = self.avg_f[j]
-            c_j = self.avg_c[j]
-
-            bonus = np.sqrt(
-                self.alpha * np.log(np.maximum(self.t, 1)) / np.maximum(1, n_j))
-            bonus[n_j == 0] = self.T
-            bonus[-1] = 0.0
-
-            f_ucb.append(f_j + bonus)
-            c_lcb.append(np.clip(c_j + bonus, 0.0, 1.0))
-
-        marginals = self._solve_marginal_lp(f_ucb, c_lcb, self.B / self.T)
-
-        choice = tuple(
-            self.rng.choice(self.Ks[j], p=marginals[j])
-            for j in range(self.N)
-        )
-
-        self.current_choice = choice
-        return choice
-
-    def update(self, rewards, costs):
-        for j, idx in enumerate(self.current_choice):
-            self.N_pulls[j][idx] += 1
-            n = self.N_pulls[j][idx]
-            self.avg_f[j][idx] += (rewards[j] - self.avg_f[j][idx]) / n
-            self.avg_c[j][idx] += (costs[j] - self.avg_c[j][idx]) / n
-        self.B_rem -= costs.sum()
-        self.t += 1
 
 
 class MultiProductFFPrimalDualPricingAgent(Agent):

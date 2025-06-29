@@ -74,19 +74,75 @@ def compute_sell_probabilities_multi(V, prices):
     return s
 
 
+def solve_clairvoyant_lp(price_grid, B, T):
+    """
+    Solves the clairvoyant per-round LP for given price grids, budget, and horizon.
+    
+    Args:
+        price_grid: list of 1D numpy arrays, each array is the prices for one product.
+        B: total inventory budget.
+        T: total number of rounds.
+    
+    Returns:
+        optimal_per_round: the optimal expected revenue per round.
+    """
+    # pacing constraint
+    rho = B / T
+    
+    # Compute true expected reward and consumption for uniform[0,1] valuations
+    f_true = [p * np.maximum(0, (1 - p)) for p in price_grid]  # expected revenue
+    c_true = [np.maximum(0,1 - p) for p in price_grid]        # expected consumption/probability
+    print(f_true, c_true)
+    # Flatten variables for LP
+    f_flat = np.concatenate(f_true)
+    c_flat = np.concatenate(c_true)
+    num_vars = len(f_flat)
+    
+    # Objective: maximize sum(f_flat * x) -> minimize -f_flat @ x
+    c_obj = -f_flat
+    
+    # Equality constraints: for each product j, its marginal sums to 1
+    N = len(price_grid)
+    A_eq = np.zeros((N, num_vars))
+    b_eq = np.ones(N)
+    offset = 0
+    for j in range(N):
+        K = len(price_grid[j])
+        A_eq[j, offset:offset+K] = 1
+        offset += K
+    
+    # Inequality: total expected consumption <= rho
+    A_ub = c_flat.reshape(1, -1)
+    b_ub = np.array([rho])
+    
+    # Variable bounds: x >= 0
+    bounds = [(0, None)] * num_vars
+    
+    # Solve using SciPy's linprog
+    res = linprog(c=c_obj, A_ub=A_ub, b_ub=b_ub,
+                  A_eq=A_eq, b_eq=b_eq, bounds=bounds,
+                  method='highs')
+    
+    if res.success:
+        optimal_per_round = -res.fun
+        simplex = res.x
+        return optimal_per_round , simplex
+    else:
+        raise ValueError("LP did not solve successfully: " + res.message)
+
 def compute_extended_clairvoyant(V, prices, total_inventory):
     """
-    Calcola la soluzione chiarveggente estesa per multi-prodotto.
+    Extended clairvoyant solution for multi-product pricing.
 
     Args:
-        V: valutazioni (T, m)
-        prices: array dei prezzi
-        total_inventory: inventario totale
+        V: valuations (T, m)
+        prices: array of prices
+        total_inventory: total inventory
 
     Returns:
-        expected_utility: utilità chiarveggente attesa per round
-        gamma: distribuzione ottimale (m, K)
-        expected_cost: costo atteso per round
+        expected_utility: expected utility per round
+        gamma: optimal distribution (m, K)
+        expected_cost: expected cost per round
     """
     T_env, m_env = V.shape
     K = len(prices)
@@ -262,13 +318,13 @@ def create_simple_prices():
 
 def create_multiproduct_price_grid(base_prices, num_products):
     """
-    Crea griglia di prezzi per multi-prodotto.
+    Create price grid for multi-product.
 
     Args:
-        base_prices: prezzi base
-        num_products: numero di prodotti
+        base_prices: base prices
+        num_products: number of products
 
     Returns:
-        price_grid: lista di array di prezzi per ogni prodotto
+        price_grid: list of arrays of prices for each product
     """
     return [base_prices.copy() for _ in range(num_products)]
