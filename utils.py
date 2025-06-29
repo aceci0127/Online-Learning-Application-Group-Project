@@ -122,11 +122,11 @@ def solve_clairvoyant_lp(price_grid, B, T):
     res = linprog(c=c_obj, A_ub=A_ub, b_ub=b_ub,
                   A_eq=A_eq, b_eq=b_eq, bounds=bounds,
                   method='highs')
-    
+    expected_cost = np.sum(c_flat * res.x)
     if res.success:
         optimal_per_round = -res.fun
         simplex = res.x
-        return optimal_per_round , simplex
+        return optimal_per_round , simplex , expected_cost
     else:
         raise ValueError("LP did not solve successfully: " + res.message)
 

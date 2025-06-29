@@ -216,8 +216,8 @@ if __name__ == "__main__":
     for _ in range(N_products)
     ]
 
-    T = 100_000
-    B = 20_000
+    T = 10_000
+    B = 8_000
     seed = 18
 
     clair_reward ,simplex = solve_clairvoyant_lp(price_grid, B, T)
