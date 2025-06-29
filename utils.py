@@ -92,7 +92,8 @@ def solve_clairvoyant_lp(price_grid, B, T):
     # Compute true expected reward and consumption for uniform[0,1] valuations
     f_true = [p * np.maximum(0, (1 - p)) for p in price_grid]  # expected revenue
     c_true = [np.maximum(0,1 - p) for p in price_grid]        # expected consumption/probability
-    print(f_true, c_true)
+    print("Expected revenue per price (f_true):", f_true)
+    print("Expected consumption per price (c_true):", c_true)
     # Flatten variables for LP
     f_flat = np.concatenate(f_true)
     c_flat = np.concatenate(c_true)
@@ -123,10 +124,11 @@ def solve_clairvoyant_lp(price_grid, B, T):
                   A_eq=A_eq, b_eq=b_eq, bounds=bounds,
                   method='highs')
     expected_cost = np.sum(c_flat * res.x)
+    print(f"Expected cost: {expected_cost:.4f}")
     if res.success:
         optimal_per_round = -res.fun
         simplex = res.x
-        return optimal_per_round , simplex , expected_cost
+        return optimal_per_round , simplex 
     else:
         raise ValueError("LP did not solve successfully: " + res.message)
 

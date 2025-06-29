@@ -120,7 +120,7 @@ class ConstrainedUCBPricingAgent(Agent):
 class ConstrainedCombinatorialUCBAgent(Agent):
     """Constrained Combinatorial UCB agent for multi-product"""
 
-    def __init__(self, price_grid, B, T, alpha=1):
+    def __init__(self, price_grid, B, T, alpha=2):
         self.price_grid = price_grid
         self.N = len(price_grid)
         self.Ks = [len(pg) for pg in price_grid]
@@ -184,9 +184,16 @@ class ConstrainedCombinatorialUCBAgent(Agent):
     def pull_arm(self):
         if self.B_rem < 1 or self.t >= self.T:
             return None
-
+        '''
+        # Pure exploration: choose price index self.t for each product if possible.
+        if all(self.t < K for K in self.Ks):
+            choice = tuple(self.t for _ in range(self.N))
+            self.current_choice = choice
+            self.t += 1  # Advance time after exploration
+            return choice
+        '''
         # TODO: capire quale rho è meglio usare
-        rho = self.B_rem / (self.T - self.t)
+        rho = self.B / self.T
 
         f_ucb = []
         c_lcb = []
@@ -198,12 +205,12 @@ class ConstrainedCombinatorialUCBAgent(Agent):
             bonus = np.sqrt(
                 self.alpha * np.log(np.maximum(self.t, 1)) / np.maximum(1, n_j))
             bonus[n_j == 0] = self.T
-            bonus[-1] = 0.0
+            #bonus[-1] = 0.0
 
             f_ucb.append(f_j + bonus)
-            c_lcb.append(np.clip(c_j + bonus, 0.0, 1.0))
+            c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
 
-        marginals = self._solve_marginal_lp(f_ucb, c_lcb, self.B / self.T)
+        marginals = self._solve_marginal_lp(f_ucb, c_lcb, rho)
 
         choice = tuple(
             self.rng.choice(self.Ks[j], p=marginals[j])

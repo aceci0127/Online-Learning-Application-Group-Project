@@ -29,13 +29,103 @@ class MultiProductPricingEnvironment:
 
 
 
+import numpy as np
+import itertools
+from scipy.optimize import linprog
+
+import numpy as np
+import itertools
+from scipy.optimize import linprog
+
+class ConstrainedCombinatorialUCBAgent2:
+    def __init__(self, price_grid, B, T, alpha=2.0):
+        self.price_grid = price_grid
+        self.N          = len(price_grid)
+        self.Ks         = [len(pg) for pg in price_grid]
+        self.bundles    = list(itertools.product(*[range(K) for K in self.Ks]))
+
+        self.B      = float(B)
+        self.B_rem  = float(B)
+        self.T      = int(T)
+        self.t      = 0
+        self.alpha  = float(alpha)
+        self.rng    = np.random.default_rng()
+
+        self.N_pulls = [np.zeros(K, dtype=int)   for K in self.Ks]
+        self.avg_f   = [np.zeros(K, dtype=float) for K in self.Ks]
+        self.avg_c   = [np.zeros(K, dtype=float) for K in self.Ks]
+
+        self.current_choice = None
+
+    def _solve_joint_lp(self, f_ucb, c_lcb):
+        F = np.array([
+            sum(f_ucb[j][b[j]] for j in range(self.N))
+            for b in self.bundles
+        ])
+        C = np.array([
+            sum(c_lcb[j][b[j]] for j in range(self.N))
+            for b in self.bundles
+        ])
+
+        rho = self.B_rem / max(1, self.T - self.t)
+
+        # linprog minimizes, so objective is -F
+        res = linprog(
+            c=-F,
+            A_ub=C.reshape(1, -1), b_ub=[rho],
+            A_eq=np.ones((1, len(F))), b_eq=[1.0],
+            bounds=[(0.0, None)] * len(F),
+            method='highs'
+        )
+        if not res.success:
+            raise RuntimeError("LP failed: " + res.message)
+        return res.x
+
+    def pull_arm(self):
+        if self.B_rem < 1 or self.t >= self.T:
+            return None
+
+        f_ucb = []
+        c_lcb = []
+        for j in range(self.N):
+            n_j = self.N_pulls[j]
+            f_j = self.avg_f[j]
+            c_j = self.avg_c[j]
+
+            # Always finite bonus, even when n_j=0
+            bonus = np.sqrt(self.alpha * np.log(self.T) / (n_j + 1))
+
+            f_ucb.append(f_j + bonus)
+            c_lcb.append(np.clip(c_j - bonus, 0.0, None))
+
+        gamma = self._solve_joint_lp(f_ucb, c_lcb)
+
+        # sample a bundle according to gamma
+        cdf = np.cumsum(gamma)
+        r   = self.rng.random()
+        idx = np.searchsorted(cdf, r, side='right')
+        choice = self.bundles[idx]
+
+        self.current_choice = choice
+        return choice
+
+    def update(self, rewards, costs):
+        for j, k in enumerate(self.current_choice):
+            self.N_pulls[j][k] += 1
+            n = self.N_pulls[j][k]
+            self.avg_f[j][k] += (rewards[j] - self.avg_f[j][k]) / n
+            self.avg_c[j][k] += (costs[j]   - self.avg_c[j][k]) / n
+
+        self.B_rem -= sum(costs)
+        self.t     += 1
+
 
 
 # ----------------------------
 # UCB Agent (with LP inside)
 # ----------------------------
 class ConstrainedCombinatorialUCBAgent:
-    def __init__(self, price_grid, B, T, alpha=1):
+    def __init__(self, price_grid, B, T, alpha=2):
         self.price_grid = price_grid
         self.N = len(price_grid)
         self.Ks = [len(pg) for pg in price_grid]
@@ -106,7 +196,7 @@ class ConstrainedCombinatorialUCBAgent:
         if self.B_rem < 1 or self.t >= self.T:
             return None
 
-        rho = self.B_rem / (self.T - self.t)
+        rho = self.B / self.T  # pacing constraint
 
         # build UCB/LCB arrays
         f_ucb = []
@@ -118,13 +208,13 @@ class ConstrainedCombinatorialUCBAgent:
 
             bonus = np.sqrt(self.alpha * np.log(np.maximum(self.t, 1)) / np.maximum(1, n_j))
             bonus[n_j == 0] = self.T        # force exploring unseen arms
-            bonus[-1] = 0.0  # last dummy price has no bonus
+            #bonus[-1] = 0.0  # last dummy price has no bonus
             
             f_ucb.append(f_j + bonus)
-            c_lcb.append(np.clip(c_j + bonus, 0.0, 1.0))
+            c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
 
         # solve LP to get marginals
-        marginals = self._solve_marginal_lp(f_ucb, c_lcb, self.B / self.T )
+        marginals = self._solve_marginal_lp(f_ucb, c_lcb, rho )
         #print(f"Round {self.t}: marginals = {marginals}, B_rem = {self.B_rem:.2f}")
 
         # sample a joint price vector
@@ -209,7 +299,7 @@ def solve_clairvoyant_lp(price_grid, B, T):
 # ----------------------------
 if __name__ == "__main__":
     N_products = 3
-    base_prices = np.array([0.2 ,0.3 , 0.4, 0.5 , 0.55 , 0.6 ,0.70,0.80,0.85, 0.90,0.95,0.98]) 
+    base_prices = np.linspace(0, 1, 15)
     dummy_price = 1.001
     price_grid = [
     np.concatenate([base_prices, [dummy_price]])
@@ -217,7 +307,7 @@ if __name__ == "__main__":
     ]
 
     T = 10_000
-    B = 8_000
+    B = 9_000
     seed = 18
 
     clair_reward ,simplex = solve_clairvoyant_lp(price_grid, B, T)
