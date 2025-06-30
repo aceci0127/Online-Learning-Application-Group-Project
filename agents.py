@@ -334,14 +334,14 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
         self.debug_chosen_prices = [[] for _ in range(m)]
         self.debug_sold_prices = [[] for _ in range(m)]
 
-    def pull_arms(self):
+    def pull_arm(self):
         if self.inventory < 1:
             return [None] * self.m
         arms = [hedge.pull_arm() for hedge in self.hedges]
         return arms
 
     def update(self, v_t):
-        arms = self.pull_arms()
+        arms = self.pull_arm()
         total_revenue = 0.0
         total_units_sold = 0
         losses = []

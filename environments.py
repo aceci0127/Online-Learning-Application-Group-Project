@@ -74,7 +74,7 @@ class BudgetedPricingEnvironment(Environment):
 class NonStationaryBudgetedPricingEnvironment(Environment):
     """Environment for non-stationary pricing with full feedback"""
 
-    def __init__(self, prices, T, shock_prob, freq=None, num_regimes=None,
+    def __init__(self, prices, T, shock_prob, freq=None, num_regimes= 10000,
                  valuation_type='piecewise_beta', rng=None):
         self.prices = np.array(prices)
         self.T = T
@@ -94,11 +94,11 @@ class NonStationaryBudgetedPricingEnvironment(Environment):
             self.valuations = generate_valuations(T, shock_prob, freq, rng=rng)
         elif valuation_type == 'piecewise_beta':
             self.valuations = generate_piecewise_beta_valuations(
-                T, shock_prob, num_regimes or 10000, rng=rng)
+                T, shock_prob, num_regimes, rng=rng)
         else:
             raise ValueError(
                 f"Tipo di valutazione non supportato: {valuation_type}")
-
+    
     def bandit_round(self, price_index):
         """Round con feedback bandit (solo reward della scelta)"""
         p = self.prices[price_index]
@@ -108,7 +108,7 @@ class NonStationaryBudgetedPricingEnvironment(Environment):
         self.t += 1
         return reward, cost
 
-    def full_feedback_round(self):
+    def round(self):
         """Round con feedback completo (ritorna la valutazione)"""
         valuation = self.valuations[self.t]
         self.t += 1
@@ -172,7 +172,7 @@ class MultiProductBudgetedPricingEnvironment(Environment):
             raise ValueError(
                 f"Tipo di valutazione non supportato: {valuation_type}")
 
-    def full_feedback_round(self):
+    def round(self):
         if self.t >= self.T:
             raise RuntimeError("Orizzonte temporale superato!")
         v_t = self.V[self.t]
