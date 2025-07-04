@@ -316,28 +316,28 @@ class FFPrimalDualPricingAgent(Agent):
 class MultiProductFFPrimalDualPricingAgent(Agent):
     """Primal-Dual agent with Full-Feedback for multi-product"""
 
-    def __init__(self, prices, T, B, m, rng, eta):
+    def __init__(self, prices, T, B, n_products, rng, eta):
         self.prices = np.array(prices)
         self.K = len(prices)
         self.T = T
-        self.m = m
+        self.n_products = n_products
         self.B = B
-        self.rho = B / (m * T)
+        self.rho = B / (n_products * T)
         self.eta = eta
 
         self.rng = rng
         self.hedges = [HedgeAgent(self.K, np.sqrt(np.log(self.K)/T), self.rng)
-                       for _ in range(m)]
+                       for _ in range(n_products)]
 
         self.lmbd = 1.0
         self.inventory = B
 
-        self.debug_chosen_prices = [[] for _ in range(m)]
-        self.debug_sold_prices = [[] for _ in range(m)]
+        self.debug_chosen_prices = [[] for _ in range(n_products)]
+        self.debug_sold_prices = [[] for _ in range(n_products)]
 
     def pull_arm(self):
         if self.inventory < 1:
-            return [None] * self.m
+            return [None] * self.n_products
         arms = [hedge.pull_arm() for hedge in self.hedges]
         return arms
 
@@ -346,13 +346,12 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
         total_revenue = 0.0
         total_units_sold = 0
         losses = []
-
         p_max = self.prices.max()
         L_up = p_max - self.lmbd * (0 - self.rho)
         L_low = 0.0 - self.lmbd * (1 - self.rho)
         norm_factor = L_up - L_low + 1e-12
 
-        for j in range(self.m):
+        for j in range(self.n_products):
             arm = arms[j]
             if arm is None:
                 self.debug_chosen_prices[j].append(None)
@@ -362,14 +361,17 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
 
             p_chosen = self.prices[arm]
             self.debug_chosen_prices[j].append(p_chosen)
-            sale = 1 if p_chosen <= v_t[j] else 0
+            # Convert v_t[j] to a scalar robustly:
+            val_j = float(np.array(v_t[j]).flatten()[0])
+            #print(val_j)
+            sale = 1 if p_chosen <= val_j else 0
             self.debug_sold_prices[j].append(p_chosen if sale == 1 else None)
 
             f = p_chosen * sale
             total_revenue += f
             total_units_sold += sale
 
-            would_sell = (self.prices <= v_t[j]).astype(float)
+            would_sell = (self.prices <= val_j).astype(float)
             f_vec = self.prices * would_sell
             L_vec = f_vec - self.lmbd * (would_sell - self.rho)
             loss_vec = 1.0 - (L_vec - L_low) / norm_factor
@@ -377,81 +379,31 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
             loss_vec[-1] = 1.0
             losses.append(loss_vec)
 
-        for j in range(self.m):
+        for j in range(self.n_products):
             self.hedges[j].update(losses[j])
 
         self.inventory -= total_units_sold
-        self.lmbd = np.clip(self.lmbd - self.eta * (self.rho * self.m - total_units_sold),
-                            a_min=0.0, a_max=1 / self.rho)
+        self.lmbd = np.clip(self.lmbd - self.eta * (self.rho * self.n_products - total_units_sold),
+                         a_min=0.0, a_max=1 / self.rho)
         return total_revenue, total_units_sold
+        
+class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBAgent):
+    """Constrained Combinatorial UCB agent with Sliding Window for non-stationarity"""
 
-
-class SlidingConstrainedCombinatorialUCBAgent:
-    def __init__(self, price_grid, B, T, alpha=2, window_size=100, rng=None):
-        self.price_grid = price_grid
-        self.N = len(price_grid)
-        self.Ks = [len(pg) for pg in price_grid]
-        self.B_rem = B
-        self.B = B
-        self.T = T
-        self.t = 0
-        self.alpha = alpha
-        self.rng = rng if rng is not None else np.random.default_rng()
-
+    def __init__(self, price_grid, B, T, alpha=1, window_size=1000):
+        super().__init__(price_grid, B, T, alpha)
         self.window_size = window_size
+
         self.samples = [
             [deque() for _ in range(K)]
             for K in self.Ks
         ]
-        self.current_choice = []
-
-    def _solve_marginal_lp(self, f_ucb, c_lcb, rho):
-        """
-        Solve the per-round LP:
-          max_x sum_j f_ucb[j]·x_j
-          s.t. ∑_k x_{j,k} = 1  ∀j,
-               ∑_{j,k} c_lcb[j][k]·x_{j,k} ≤ rho,
-               x ≥ 0.
-        Returns a list of marginals [x_0, x_1, …, x_{N-1}].
-        """
-        # flatten objective and constraints
-        f_flat = np.concatenate(f_ucb)
-        c_flat = np.concatenate(c_lcb)
-        # objective for linprog: minimize -f_flat @ x
-        num_vars = len(f_flat)
-        c_obj = -f_flat        # equality: per-product sums = 1
-        A_eq = np.zeros((self.N, num_vars))
-        b_eq = np.ones(self.N)
-        offset = 0
-        for j, K in enumerate(self.Ks):
-            A_eq[j, offset:offset+K] = 1
-            offset += K        # inequality: total consumption ≤ rho
-        A_ub = c_flat.reshape(1, -1)
-        b_ub = np.array([rho])
-        bounds = [(0, None)] * num_vars
-        res = linprog(c=c_obj,
-                      A_ub=A_ub, b_ub=b_ub,
-                      A_eq=A_eq, b_eq=b_eq,
-                      bounds=bounds,
-                      method='highs')
-        if not res.success:
-            raise RuntimeError("LP failed: " + res.message)
-        x_flat = res.x
-        # un-flatten to list of arrays
-        marginals = []
-        offset = 0
-        for K in self.Ks:
-            marginals.append(x_flat[offset:offset+K])
-            offset += K
-
-        return marginals
 
     def pull_arm(self):
         if self.B_rem < 1 or self.t >= self.T:
             return None
 
         rho = self.B_rem / (self.T - self.t)
-        rho = self.B / self.T
         f_ucb = []
         c_lcb = []
 
@@ -481,15 +433,14 @@ class SlidingConstrainedCombinatorialUCBAgent:
 
             bonus = np.sqrt(
                 self.alpha * np.log(max(self.t, 1)) / np.maximum(1, n_j))
-            bonus[n_j == 0] = self.T   # force exploration for unseen arms
-            if n_j[-1] > 0:
-                bonus[-1] = 0.0           # last dummy price has no bonus
+            bonus[n_j == 0] = self.T
+            bonus[-1] = 0.0
 
             f_ucb.append(f_j + bonus)
-            c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
+            c_lcb.append(np.clip(c_j + bonus, 0.0, 1.0))
 
-        marginals = self._solve_marginal_lp(f_ucb, c_lcb, rho)
-        choice = list(
+        marginals = self._solve_marginal_lp(f_ucb, c_lcb, self.B / self.T)
+        choice = tuple(
             self.rng.choice(self.Ks[j], p=marginals[j])
             for j in range(self.N)
         )
@@ -500,3 +451,4 @@ class SlidingConstrainedCombinatorialUCBAgent:
         for j, idx in enumerate(self.current_choice):
             self.samples[j][idx].append((self.t, rewards[j], costs[j]))
         self.B_rem -= costs.sum()
+        self.t += 1
