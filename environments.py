@@ -74,7 +74,7 @@ class BudgetedPricingEnvironment(Environment):
 class NonStationaryBudgetedPricingEnvironment(Environment):
     """Environment for non-stationary pricing with full feedback"""
 
-    def __init__(self, prices, T, shock_prob, freq=None, num_regimes= 10000,
+    def __init__(self, prices, T, shock_prob, freq=None, num_regimes=10000,
                  valuation_type='piecewise_beta', rng=None):
         self.prices = np.array(prices)
         self.T = T
@@ -98,7 +98,7 @@ class NonStationaryBudgetedPricingEnvironment(Environment):
         else:
             raise ValueError(
                 f"Tipo di valutazione non supportato: {valuation_type}")
-    
+
     def bandit_round(self, price_index):
         """Round con feedback bandit (solo reward della scelta)"""
         p = self.prices[price_index]
@@ -180,21 +180,14 @@ class MultiProductBudgetedPricingEnvironment(Environment):
         return v_t
 
 
-class SlidingWindowMultiProductEnvironment(Environment):
-    """Multi-product environment with sliding window for non-stationarity"""
-
-    def __init__(self, price_grid, T, num_windows, rng=None):
+class SmoothMultiProductPricingEnvironment:
+    def __init__(self, price_grid, T, valuations, rng):
         self.price_grid = price_grid
         self.N = len(price_grid)
         self.T = T
         self.t = 0
-        self.num_windows = num_windows
-        self.rng = rng if rng is not None else np.random.default_rng()
-
-        self.expectations, self.vals = generate_flattened_valuation_data(
-            T, self.num_windows, self.N, transition_frac=0.1,
-            concentration=50, rng=self.rng
-        )
+        self.rng = rng
+        self.vals = valuations
 
     def round(self, price_indices):
         vs = self.vals[self.t]
@@ -206,4 +199,4 @@ class SlidingWindowMultiProductEnvironment(Environment):
                 rewards[j] = p
                 costs[j] = 1.0
         self.t += 1
-        return rewards, costs
+        return rewards, costs, vs

@@ -1,7 +1,7 @@
 import numpy as np
 from abc import ABC, abstractmethod
 from scipy.optimize import linprog
-from collections import deque, Counter
+from collections import deque
 
 
 class Agent(ABC):
@@ -206,7 +206,7 @@ class ConstrainedCombinatorialUCBAgent(Agent):
             bonus = np.sqrt(
                 self.alpha * np.log(np.maximum(self.t, 1)) / np.maximum(1, n_j))
             bonus[n_j == 0] = self.T
-            #bonus[-1] = 0.0
+            # bonus[-1] = 0.0
 
             f_ucb.append(f_j + bonus)
             c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
@@ -386,23 +386,72 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
         return total_revenue, total_units_sold
 
 
-class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBAgent):
-    """Constrained Combinatorial UCB agent with Sliding Window for non-stationarity"""
+class SlidingConstrainedCombinatorialUCBAgent:
+    def __init__(self, price_grid, B, T, alpha=2, window_size=100, rng=None):
+        self.price_grid = price_grid
+        self.N = len(price_grid)
+        self.Ks = [len(pg) for pg in price_grid]
+        self.B_rem = B
+        self.B = B
+        self.T = T
+        self.t = 0
+        self.alpha = alpha
+        self.rng = rng if rng is not None else np.random.default_rng()
 
-    def __init__(self, price_grid, B, T, alpha=1, window_size=1000):
-        super().__init__(price_grid, B, T, alpha)
         self.window_size = window_size
-
         self.samples = [
             [deque() for _ in range(K)]
             for K in self.Ks
         ]
+        self.current_choice = []
+
+    def _solve_marginal_lp(self, f_ucb, c_lcb, rho):
+        """
+        Solve the per-round LP:
+          max_x sum_j f_ucb[j]·x_j
+          s.t. ∑_k x_{j,k} = 1  ∀j,
+               ∑_{j,k} c_lcb[j][k]·x_{j,k} ≤ rho,
+               x ≥ 0.
+        Returns a list of marginals [x_0, x_1, …, x_{N-1}].
+        """
+        # flatten objective and constraints
+        f_flat = np.concatenate(f_ucb)
+        c_flat = np.concatenate(c_lcb)
+        # objective for linprog: minimize -f_flat @ x
+        num_vars = len(f_flat)
+        c_obj = -f_flat        # equality: per-product sums = 1
+        A_eq = np.zeros((self.N, num_vars))
+        b_eq = np.ones(self.N)
+        offset = 0
+        for j, K in enumerate(self.Ks):
+            A_eq[j, offset:offset+K] = 1
+            offset += K        # inequality: total consumption ≤ rho
+        A_ub = c_flat.reshape(1, -1)
+        b_ub = np.array([rho])
+        bounds = [(0, None)] * num_vars
+        res = linprog(c=c_obj,
+                      A_ub=A_ub, b_ub=b_ub,
+                      A_eq=A_eq, b_eq=b_eq,
+                      bounds=bounds,
+                      method='highs')
+        if not res.success:
+            raise RuntimeError("LP failed: " + res.message)
+        x_flat = res.x
+        # un-flatten to list of arrays
+        marginals = []
+        offset = 0
+        for K in self.Ks:
+            marginals.append(x_flat[offset:offset+K])
+            offset += K
+
+        return marginals
 
     def pull_arm(self):
         if self.B_rem < 1 or self.t >= self.T:
             return None
 
         rho = self.B_rem / (self.T - self.t)
+        rho = self.B / self.T
         f_ucb = []
         c_lcb = []
 
@@ -432,14 +481,15 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
 
             bonus = np.sqrt(
                 self.alpha * np.log(max(self.t, 1)) / np.maximum(1, n_j))
-            bonus[n_j == 0] = self.T
-            bonus[-1] = 0.0
+            bonus[n_j == 0] = self.T   # force exploration for unseen arms
+            if n_j[-1] > 0:
+                bonus[-1] = 0.0           # last dummy price has no bonus
 
             f_ucb.append(f_j + bonus)
-            c_lcb.append(np.clip(c_j + bonus, 0.0, 1.0))
+            c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
 
-        marginals = self._solve_marginal_lp(f_ucb, c_lcb, self.B / self.T)
-        choice = tuple(
+        marginals = self._solve_marginal_lp(f_ucb, c_lcb, rho)
+        choice = list(
             self.rng.choice(self.Ks[j], p=marginals[j])
             for j in range(self.N)
         )
@@ -450,4 +500,3 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
         for j, idx in enumerate(self.current_choice):
             self.samples[j][idx].append((self.t, rewards[j], costs[j]))
         self.B_rem -= costs.sum()
-        self.t += 1
