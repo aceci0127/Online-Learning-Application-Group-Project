@@ -77,31 +77,33 @@ def compute_sell_probabilities_multi(V, prices):
 def solve_clairvoyant_lp(price_grid, B, T):
     """
     Solves the clairvoyant per-round LP for given price grids, budget, and horizon.
-    
+
     Args:
         price_grid: list of 1D numpy arrays, each array is the prices for one product.
         B: total inventory budget.
         T: total number of rounds.
-    
+
     Returns:
         optimal_per_round: the optimal expected revenue per round.
     """
     # pacing constraint
     rho = B / T
-    
+
     # Compute true expected reward and consumption for uniform[0,1] valuations
-    f_true = [p * np.maximum(0, (1 - p)) for p in price_grid]  # expected revenue
-    c_true = [np.maximum(0,1 - p) for p in price_grid]        # expected consumption/probability
+    f_true = [p * np.maximum(0, (1 - p))
+              for p in price_grid]  # expected revenue
+    # expected consumption/probability
+    c_true = [np.maximum(0, 1 - p) for p in price_grid]
     print("Expected revenue per price (f_true):", f_true)
     print("Expected consumption per price (c_true):", c_true)
     # Flatten variables for LP
     f_flat = np.concatenate(f_true)
     c_flat = np.concatenate(c_true)
     num_vars = len(f_flat)
-    
+
     # Objective: maximize sum(f_flat * x) -> minimize -f_flat @ x
     c_obj = -f_flat
-    
+
     # Equality constraints: for each product j, its marginal sums to 1
     N = len(price_grid)
     A_eq = np.zeros((N, num_vars))
@@ -111,14 +113,14 @@ def solve_clairvoyant_lp(price_grid, B, T):
         K = len(price_grid[j])
         A_eq[j, offset:offset+K] = 1
         offset += K
-    
+
     # Inequality: total expected consumption <= rho
     A_ub = c_flat.reshape(1, -1)
     b_ub = np.array([rho])
-    
+
     # Variable bounds: x >= 0
     bounds = [(0, None)] * num_vars
-    
+
     # Solve using SciPy's linprog
     res = linprog(c=c_obj, A_ub=A_ub, b_ub=b_ub,
                   A_eq=A_eq, b_eq=b_eq, bounds=bounds,
@@ -128,9 +130,10 @@ def solve_clairvoyant_lp(price_grid, B, T):
     if res.success:
         optimal_per_round = -res.fun
         simplex = res.x
-        return optimal_per_round , simplex 
+        return optimal_per_round, simplex
     else:
         raise ValueError("LP did not solve successfully: " + res.message)
+
 
 def compute_extended_clairvoyant(V, prices, total_inventory):
     """
@@ -315,7 +318,7 @@ def create_default_prices():
 
 def create_simple_prices():
     """Crea array di prezzi semplice per esperimenti base"""
-    return np.array([0.1, 0.2, 0.3, 0.5, 0.7, 0.8])
+    return np.array([0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0])
 
 
 def create_multiproduct_price_grid(base_prices, num_products):

@@ -16,8 +16,8 @@ def generate_beta_valuations(T, shock_prob, freq, rng=None):
     valuations = np.empty(T)
     for t in range(T):
         # Oscillating Alpha and Beta parameters
-        alpha_t = 1 + 4 * (0.5 + 0.5 * np.sin(10*np.pi * t / T))
-        beta_t = 1 + 4 * (0.5 + 0.5 * np.cos(10*np.pi * t / T))
+        alpha_t = 1 + 4 * (0.5 + 0.5 * np.sin(freq*np.pi * t / T))
+        beta_t = 1 + 4 * (0.5 + 0.5 * np.cos(freq*np.pi * t / T))
         valuations[t] = rng.beta(alpha_t, beta_t)
     return valuations
 

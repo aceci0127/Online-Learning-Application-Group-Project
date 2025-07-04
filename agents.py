@@ -109,10 +109,10 @@ class ConstrainedUCBPricingAgent(Agent):
 
     def update(self, f_t, c_t):
         self.N_pulls[self.a_t] += 1
-        self.avg_f[self.a_t] += (f_t - self.avg_f[self.a_t]
-                                 )/self.N_pulls[self.a_t]
-        self.avg_c[self.a_t] += (c_t - self.avg_c[self.a_t]
-                                 )/self.N_pulls[self.a_t]
+        self.avg_f[self.a_t] += (f_t - self.avg_f[self.a_t]) / \
+            self.N_pulls[self.a_t]
+        self.avg_c[self.a_t] += (c_t - self.avg_c[self.a_t]) / \
+            self.N_pulls[self.a_t]
         self.rem_budget -= c_t
         self.t += 1
 
@@ -193,6 +193,7 @@ class ConstrainedCombinatorialUCBAgent(Agent):
             return choice
         '''
         # TODO: capire quale rho è meglio usare
+        rho = self.B_rem / (self.T - self.t + 1)
         rho = self.B / self.T
 
         f_ucb = []
