@@ -3,6 +3,7 @@ from scipy.optimize import linprog
 from scipy.stats import truncnorm
 import matplotlib.pyplot as plt
 from typing import List
+from numpy.typing import NDArray
 
 
 def compute_expected_revenues(prices, mu=0.8, sigma=0.2, lower=0., upper=1.):
@@ -310,19 +311,19 @@ def print_final_results(avg_regret, avg_units, min_rounds, final_rewards, agent=
         print(f"Conteggi pull: {agent.pull_counts}")
 
 
-def create_default_prices():
+def create_default_prices() -> NDArray[np.float64]:
     """Crea array di prezzi di default per gli esperimenti"""
     return np.array([0.2, 0.256, 0.311, 0.367, 0.422, 0.478,
                      0.533, 0.589, 0.644, 0.7, 0.756, 0.811,
                      0.867, 0.922, 0.98, 1.001])
 
 
-def create_simple_prices():
+def create_simple_prices() -> NDArray[np.float64]:
     """Crea array di prezzi semplice per esperimenti base"""
     return np.array([0.1, 0.2, 0.3, 0.5, 0.7, 0.8])
 
 
-def create_multiproduct_price_grid(base_prices, num_products) -> List[np.ndarray]:
+def create_multiproduct_price_grid(base_prices: NDArray[np.float64], num_products: int) -> NDArray[np.float64]:
     """
     Create price grid for multi-product.
 
@@ -333,4 +334,4 @@ def create_multiproduct_price_grid(base_prices, num_products) -> List[np.ndarray
     Returns:
         price_grid: list of arrays of prices for each product
     """
-    return [base_prices.copy() for _ in range(num_products)]
+    return base_prices
