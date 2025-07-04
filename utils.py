@@ -2,6 +2,7 @@ import numpy as np
 from scipy.optimize import linprog
 from scipy.stats import truncnorm
 import matplotlib.pyplot as plt
+from typing import List
 
 
 def compute_expected_revenues(prices, mu=0.8, sigma=0.2, lower=0., upper=1.):
@@ -318,10 +319,10 @@ def create_default_prices():
 
 def create_simple_prices():
     """Crea array di prezzi semplice per esperimenti base"""
-    return np.array([0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0])
+    return np.array([0.1, 0.2, 0.3, 0.5, 0.7, 0.8])
 
 
-def create_multiproduct_price_grid(base_prices, num_products):
+def create_multiproduct_price_grid(base_prices, num_products) -> List[np.ndarray]:
     """
     Create price grid for multi-product.
 
