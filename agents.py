@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from scipy.optimize import linprog
 from collections import deque
-from typing import List, Tuple, Optional, Any
+from math import log, sqrt
+from typing import List, Tuple, Optional, Union
 import numpy as np
 
 
@@ -9,12 +10,12 @@ class Agent(ABC):
     """Abstract base class for all agents"""
 
     @abstractmethod
-    def pull_arm(self) -> Any:
+    def pull_arm(self) -> Union[int, List[Optional[int]], Tuple[int, ...]]:
         """Select an action/arm"""
         pass
 
     @abstractmethod
-    def update(self, feedback: Any) -> None:
+    def update(self, feedback: object) -> None:
         """Update the agent with the received feedback"""
         pass
 
@@ -67,29 +68,22 @@ class ConstrainedUCBPricingAgent(Agent):
         self.t: int = 0
 
     def pull_arm(self) -> Optional[int]:
-        # 1) Stop if out of budget
         if self.rem_budget < 1:
             self.a_t = None
             return None
 
-        # 2) Pure exploration: each real arm exactly once
         if self.t < self.K:
             self.a_t = self.t
             return self.a_t
 
-        # 3) Build UCB/LCB for all arms
         f_ucbs = self.avg_f + \
             np.sqrt(self.alpha * np.log(self.t) / self.N_pulls)
         c_lcbs = self.avg_c - \
             np.sqrt(self.alpha * np.log(self.t) / self.N_pulls)
-
         c_lcbs = np.clip(c_lcbs, 0.0, 1.0)
-
-        # 4) Set the last arm to 0 for the dummy arm
         f_ucbs[-1] = 0.0
         c_lcbs[-1] = 0.0
 
-        # 5) Solve the LP
         gamma_t = self.compute_opt(f_ucbs, c_lcbs)
         self.a_t = int(self.rng.choice(self.K, p=gamma_t))
         return self.a_t
@@ -102,10 +96,7 @@ class ConstrainedUCBPricingAgent(Agent):
         b_eq = [1]
         res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq,
                       b_eq=b_eq, bounds=(0, 1))
-
-        gamma = res.x
-        # expected = -res.fun to get expected revenue
-
+        gamma: np.ndarray = res.x
         if not np.all(gamma >= 0):
             raise ValueError(
                 "Invalid distribution: negative probabilities found in gamma.")
@@ -136,11 +127,10 @@ class ConstrainedCombinatorialUCBAgent(Agent):
         self.B_rem: float = B
         self.B: float = B
         self.T: int = T
-        self.rho: float = B / T  # TODO or adaptive one
+        self.rho: float = B / T
         self.t: int = 0
         self.alpha: float = alpha
         self.rng = np.random.default_rng()
-
         self.N_pulls: List[np.ndarray] = [np.zeros(K) for K in self.Ks]
         self.avg_f: List[np.ndarray] = [np.zeros(K) for K in self.Ks]
         self.avg_c: List[np.ndarray] = [np.zeros(K) for K in self.Ks]
@@ -168,7 +158,6 @@ class ConstrainedCombinatorialUCBAgent(Agent):
                       A_eq=A_eq, b_eq=b_eq,
                       bounds=bounds,
                       method='highs')
-
         if not res.success:
             raise RuntimeError("LP failed: " + res.message)
 
@@ -178,7 +167,6 @@ class ConstrainedCombinatorialUCBAgent(Agent):
         for K in self.Ks:
             marginals.append(x_flat[offset:offset + K])
             offset += K
-
         return marginals
 
     def pull_arm(self) -> Optional[Tuple[int, ...]]:
@@ -203,10 +191,7 @@ class ConstrainedCombinatorialUCBAgent(Agent):
         marginals: List[np.ndarray] = self._solve_marginal_lp(
             f_ucb, c_lcb, self.rho)
         choice: Tuple[int, ...] = tuple(
-            int(self.rng.choice(self.Ks[j], p=marginals[j]))
-            for j in range(self.N)
-        )
-
+            int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N))
         self.current_choice = choice
         return choice
 
@@ -233,7 +218,7 @@ class HedgeAgent(Agent):
         self.t: int = 0
 
     def pull_arm(self) -> int:
-        self.x_t = self.weights / sum(self.weights)
+        self.x_t = self.weights / np.sum(self.weights)
         self.a_t = int(self.rng.choice(np.arange(self.K), p=self.x_t))
         return int(self.a_t)
 
@@ -252,7 +237,6 @@ class FFPrimalDualPricingAgent(Agent):
         self.inventory: float = B
         self.eta: float = eta
         self.rng = np.random.default_rng()
-
         self.hedge: HedgeAgent = HedgeAgent(
             self.K, np.sqrt(np.log(self.K) / T))
         self.rho: float = B / T
@@ -274,20 +258,17 @@ class FFPrimalDualPricingAgent(Agent):
         c_full: np.ndarray = sale_mask
 
         L: np.ndarray = f_full - self.lmbd * (c_full - self.rho)
-
         f_max: float = self.prices.max()
         L_up: float = f_max - self.lmbd * (0 - self.rho)
         L_low: float = 0.0 - self.lmbd * (1 - self.rho)
 
         rescaled: np.ndarray = (L - L_low) / (L_up - L_low + 1e-12)
         losses: np.ndarray = 1.0 - rescaled
-
         self.hedge.update(losses)
 
         if self.last_arm is not None:
             c_t: int = 1 if self.prices[self.last_arm] <= v_t else 0
             f_t: float = self.prices[self.last_arm] * c_t
-
             self.inventory -= c_t
             self.pull_counts[self.last_arm] += 1
         else:
@@ -295,9 +276,7 @@ class FFPrimalDualPricingAgent(Agent):
             f_t = 0.0
 
         self.lmbd = np.clip(self.lmbd - self.eta * (self.rho - c_t),
-                            a_min=0.0,
-                            a_max=1.0 / self.rho)
-
+                            a_min=0.0, a_max=1.0 / self.rho)
         self.t += 1
         return f_t, float(c_t)
 
@@ -305,15 +284,15 @@ class FFPrimalDualPricingAgent(Agent):
 class MultiProductFFPrimalDualPricingAgent(Agent):
     """Primal-Dual agent with Full-Feedback for multi-product"""
 
-    def __init__(self, prices: np.ndarray, T: int, B: float, n_products: int, eta: float) -> None:
-        self.prices: np.ndarray = np.array(prices)
-        self.K: int = len(prices)
+    def __init__(self, prices: List[np.ndarray], T: int, B: float, n_products: int, eta: float) -> None:
+        # Assuming all products have the same price grid
+        self.prices: np.ndarray = prices[0]
+        self.K: int = len(prices[0])
         self.T: int = T
         self.n_products: int = n_products
         self.B: float = B
         self.rho: float = B / (n_products * T)
         self.eta: float = eta
-
         self.rng = np.random.default_rng()
         self.hedges: List[HedgeAgent] = [HedgeAgent(self.K, np.sqrt(np.log(self.K) / T))
                                          for _ in range(n_products)]
@@ -325,7 +304,7 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
         arms: List[Optional[int]] = [hedge.pull_arm() for hedge in self.hedges]
         return arms
 
-    def update(self, v_t: List[Any]) -> Tuple[float, int]:
+    def update(self, v_t: np.ndarray) -> Tuple[float, int]:
         arms: List[Optional[int]] = self.pull_arm()
         total_revenue: float = 0.0
         total_units_sold: int = 0
@@ -342,9 +321,10 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
                 continue
 
             p_chosen: float = self.prices[arm]
-            val_j: float = float(np.array(v_t[j]).flatten()[0])
-            sale: int = 1 if p_chosen <= val_j else 0
+            # v_t[j] is assumed to be a numpy array; take the first element after flattening
+            val_j: float = float(v_t[j])
 
+            sale: int = 1 if p_chosen <= val_j else 0
             f_val: float = p_chosen * sale
             total_revenue += f_val
             total_units_sold += sale
@@ -371,11 +351,8 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
     def __init__(self, price_grid: List[np.ndarray], B: float, T: int, window_size: int, alpha: float = 2) -> None:
         super().__init__(price_grid, B, T, alpha)
         self.window_size: int = window_size
-
-        self.samples: List[List[deque]] = [
-            [deque() for _ in range(K)]
-            for K in self.Ks
-        ]
+        self.samples: List[List[deque]] = [[deque() for _ in range(K)]
+                                           for K in self.Ks]
 
     def pull_arm(self) -> Optional[Tuple[int, ...]]:
         if self.B_rem < 1 or self.t >= self.T:
@@ -383,17 +360,14 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
 
         f_ucb: List[np.ndarray] = []
         c_lcb: List[np.ndarray] = []
-
         for j in range(self.N):
             K: int = self.Ks[j]
             f_j_vals: List[float] = []
             c_j_vals: List[float] = []
             n_j_vals: List[int] = []
-
             for k in range(K):
                 while self.samples[j][k] and self.samples[j][k][0][0] < self.t - self.window_size:
                     self.samples[j][k].popleft()
-
                 samples: deque = self.samples[j][k]
                 n: int = len(samples)
                 avg_reward: float = np.mean(
@@ -403,24 +377,19 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
                 n_j_vals.append(n)
                 f_j_vals.append(avg_reward)
                 c_j_vals.append(avg_cost)
-
             n_j: np.ndarray = np.array(n_j_vals)
             f_j: np.ndarray = np.array(f_j_vals)
             c_j: np.ndarray = np.array(c_j_vals)
-
             bonus: np.ndarray = np.sqrt(
                 self.alpha * np.log(max(self.t, 1)) / np.maximum(1, n_j))
             bonus[n_j == 0] = self.T
             bonus[-1] = 0.0
-
             f_ucb.append(f_j + bonus)
             c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
-
         marginals: List[np.ndarray] = self._solve_marginal_lp(
             f_ucb, c_lcb, self.rho)
         choice: Tuple[int, ...] = tuple(
-            int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N)
-        )
+            int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N))
         self.current_choice = choice
         return choice
 
