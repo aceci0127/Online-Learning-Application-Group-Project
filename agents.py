@@ -1,7 +1,8 @@
+from typing import List, Optional, Tuple
 from abc import ABC, abstractmethod
 from scipy.optimize import linprog
 from collections import deque
-from math import log, sqrt
+import math as math
 from typing import List, Tuple, Optional, Union
 import numpy as np
 
@@ -398,3 +399,114 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
             self.samples[j][idx].append((self.t, rewards[j], costs[j]))
         self.B_rem -= costs.sum()
         self.t += 1
+
+#########
+
+
+class Exp3PAgent:
+    """EXP3.P sub-agent for single product"""
+
+    def __init__(self, K: int, T: int, delta: float = 0.1):
+        self.K = K
+        self.gamma = min(1.0, math.sqrt(
+            (K * math.log(K / delta)) / ((math.e - 1) * T)))
+        self.alpha = (math.log(K / delta) / K) * \
+            math.sqrt(1 / ((math.e - 1) * T))
+        self.weights = np.ones(K)
+        self.probs = np.ones(K) / K
+        self.t = 0
+
+    def get_probs(self) -> np.ndarray:
+        W = np.sum(self.weights)
+        base = (1 - self.gamma) * (self.weights / W)
+        return base + self.gamma / self.K
+
+    def pull_arm(self) -> int:
+        self.probs = self.get_probs()
+        choice = int(np.random.choice(self.K, p=self.probs))
+        self.t += 1
+        return choice
+
+    def update(self, chosen: int, reward: float) -> None:
+        # reward in [0,1]
+        p = self.probs[chosen]
+        x_hat = reward / p
+        # correction term for variance
+        correction = self.alpha / (p * math.sqrt(self.K * self.t))
+        self.weights[chosen] *= math.exp((self.gamma *
+                                         x_hat + correction) / self.K)
+
+
+class MultiProductPDExp3PricingAgent:
+    """Primal-Dual agent using EXP3.P bandit feedback for multi-product pricing"""
+
+    def __init__(
+        self,
+        prices: List[np.ndarray],
+        T: int,
+        B: float,
+        n_products: int,
+        delta: float = 0.1,
+        eta: Optional[float] = None
+    ) -> None:
+        self.prices = prices[0]  # assume same grid
+        self.K = len(self.prices)
+        self.T = T
+        self.n_products = n_products
+        self.B = B
+        self.rho = B / (n_products * T)
+        # EXP3.P parameters
+        self.delta = delta
+        self.sub_agents = [Exp3PAgent(self.K, T, delta)
+                           for _ in range(n_products)]
+        # Dual step size
+        self.eta = eta if eta is not None else 1 / math.sqrt(n_products * T)
+        self.lmbd = 1.0
+        self.t = 0
+
+    def pull_arm(self) -> List[Optional[int]]:
+        if self.B < 1:
+            return [None] * self.n_products
+        choices = [agent.pull_arm() for agent in self.sub_agents]
+        return choices
+
+    def update(self, values: np.ndarray) -> Tuple[float, int]:
+        # Bandit feedback: only see chosen arms' sales
+        choices = self.pull_arm()
+        total_revenue = 0.0
+        total_sales = 0
+
+        p_max = self.prices.max()
+        for j, agent in enumerate(self.sub_agents):
+            choice = choices[j]
+            if choice is None:
+                continue
+            price = self.prices[choice]
+            val = float(values[j])
+            sale = 1.0 if price <= val else 0.0
+
+            # primal reward: price * sale
+            reward = price * sale
+            total_revenue += reward
+            total_sales += int(sale)
+
+            # dual penalty term: (sale - rho)
+            penalty = self.lmbd * (sale - self.rho)
+            # net reward normalized to [0,1]
+            net = reward - penalty
+            net_norm = (net + p_max) / (2 * p_max)
+
+            # update EXP3.P sub-agent
+            agent.probs = agent.get_probs()
+            agent.update(choice, net_norm)
+
+        # update dual variable lambda
+        self.lmbd = np.clip(
+            self.lmbd - self.eta * (self.rho * self.n_products - total_sales),
+            a_min=0.0, a_max=1/self.rho
+        )
+
+        self.B -= total_sales
+        self.t += 1
+
+        return total_revenue, total_sales
