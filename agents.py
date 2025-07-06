@@ -245,6 +245,9 @@ class FFPrimalDualPricingAgent(Agent):
         self.t: int = 0
         self.pull_counts: np.ndarray = np.zeros(self.K, int)
         self.last_arm: Optional[int] = None
+        # New histories for plotting
+        self.lmbd_history: List[float] = []
+        self.hedge_weight_history: List[np.ndarray] = []
 
     def pull_arm(self) -> Optional[int]:
         if self.inventory < 1:
@@ -276,14 +279,18 @@ class FFPrimalDualPricingAgent(Agent):
             c_t = 0
             f_t = 0.0
 
+        # Update lambda and record it
         self.lmbd = np.clip(self.lmbd - self.eta * (self.rho - c_t),
                             a_min=0.0, a_max=1.0 / self.rho)
+        self.lmbd_history.append(self.lmbd)
+        # Record a copy of the current hedge weights
+        self.hedge_weight_history.append(self.hedge.weights.copy())
         self.t += 1
         return f_t, float(c_t)
 
 
 class MultiProductFFPrimalDualPricingAgent(Agent):
-    """Primal-Dual agent with Full-Feedback for multi-product"""
+    """Primal-Dual agent with Full-Feedback for multi-product pricing"""
 
     def __init__(self, prices: List[np.ndarray], T: int, B: float, n_products: int, eta: float) -> None:
         # Assuming all products have the same price grid
@@ -295,9 +302,16 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
         self.rho: float = B / (n_products * T)
         self.eta: float = eta
         self.rng = np.random.default_rng()
-        self.hedges: List[HedgeAgent] = [HedgeAgent(self.K, np.sqrt(np.log(self.K) / T))
-                                         for _ in range(n_products)]
+        self.hedges: List[HedgeAgent] = [
+            HedgeAgent(self.K, np.sqrt(np.log(self.K) / T))
+            for _ in range(n_products)
+        ]
         self.lmbd: float = 1.0
+        # Record lambda history as before
+        self.lmbd_history: List[float] = []
+        # New: record hedge probabilities for each product over time
+        self.hedge_prob_history: List[List[np.ndarray]] = [
+            [] for _ in range(n_products)]
 
     def pull_arm(self) -> List[Optional[int]]:
         if self.B < 1:
@@ -322,9 +336,7 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
                 continue
 
             p_chosen: float = self.prices[arm]
-            # v_t[j] is assumed to be a numpy array; take the first element after flattening
             val_j: float = float(v_t[j])
-
             sale: int = 1 if p_chosen <= val_j else 0
             f_val: float = p_chosen * sale
             total_revenue += f_val
@@ -337,12 +349,17 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
             loss_vec[-1] = 1.0
             losses.append(loss_vec)
 
+        # Update each product-specific hedge and record its normalized probabilities
         for j in range(self.n_products):
             self.hedges[j].update(losses[j])
+            # Record normalized probabilities for product j
+            prob_j = self.hedges[j].weights / np.sum(self.hedges[j].weights)
+            self.hedge_prob_history[j].append(prob_j.copy())
 
         self.B -= total_units_sold
         self.lmbd = np.clip(self.lmbd - self.eta * (self.rho * self.n_products - total_units_sold),
                             a_min=0.0, a_max=1 / self.rho)
+        self.lmbd_history.append(self.lmbd)
         return total_revenue, total_units_sold
 
 
