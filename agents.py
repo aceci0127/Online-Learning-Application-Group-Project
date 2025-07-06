@@ -289,6 +289,70 @@ class FFPrimalDualPricingAgent(Agent):
         return f_t, float(c_t)
 
 
+class BanditFeedbackPrimalDual(Agent):
+    """Primal-Dual agent with Bandit Feedback for non-stationary pricing using EXP3.P."""
+
+    def __init__(self, prices: np.ndarray, T: int, B: float) -> None:
+        self.prices: np.ndarray = np.array(prices)
+        self.K: int = len(prices)
+        self.T: int = T
+        self.inventory: float = B
+        self.eta: float = 1 / np.sqrt(T)
+        self.rng = np.random.default_rng()
+        # Use EXP3.P as the primal (hedge) agent with a given delta
+        self.hedge: Exp3PAgent = Exp3PAgent(K=self.K, T=self.T, delta=0.05)
+        self.rho: float = B / T
+        self.lmbd: float = 1.0
+        self.t: int = 0
+        self.pull_counts: np.ndarray = np.zeros(self.K, int)
+        self.last_arm: Optional[int] = None
+        # Histories for plotting
+        self.lmbd_history: List[float] = []
+        self.hedge_weight_history: List[np.ndarray] = []
+
+    def pull_arm(self) -> Optional[int]:
+        if self.inventory < 1:
+            self.last_arm = None
+            return self.last_arm
+        self.last_arm = self.hedge.pull_arm()
+        return self.last_arm
+
+    def update(self, v_t: float) -> Tuple[float, float]:
+        if self.last_arm is None:
+            return 0.0, 0.0
+
+        # Determine whether a sale occurs at the chosen price
+        price_chosen = self.prices[self.last_arm]
+        sale = 1 if price_chosen <= v_t else 0
+
+        # Revenue is the price if a sale occurs, cost is simply the sale indicator
+        f_t = price_chosen * sale
+        c_t = sale
+
+        # Update inventory and record count for the chosen arm
+        self.inventory -= c_t
+        self.pull_counts[self.last_arm] += 1
+
+        # Compute net reward with a dual penalty term
+        penalty = self.lmbd * (sale - self.rho)
+        net = f_t - penalty
+        p_max = self.prices.max()
+        # Normalize the net reward to be in [0,1] for bandit feedback purposes
+        net_norm = (net + p_max) / (2 * p_max)
+
+        # Update the EXP3.P (hedge) sub-agent using the bandit reward feedback for the chosen arm
+        self.hedge.probs = self.hedge._compute_probs()
+        self.hedge.update(self.last_arm, net_norm)
+
+        # Update the dual variable lambda based on the observed cost vs. the per-round budget (rho)
+        self.lmbd = np.clip(self.lmbd - self.eta * (self.rho - c_t),
+                            a_min=0.0, a_max=1.0 / self.rho)
+        self.lmbd_history.append(self.lmbd)
+
+        self.t += 1
+        return f_t, float(c_t)
+
+
 class MultiProductFFPrimalDualPricingAgent(Agent):
     """Primal-Dual agent with Full-Feedback for multi-product pricing"""
 
@@ -420,38 +484,84 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
 #########
 
 
-class Exp3PAgent:
-    """EXP3.P sub-agent for single product"""
+class Exp3PAgent(Agent):
+    """
+    EXP3.P agent for adversarial bandits with high-probability regret bounds.
+
+    Implements the algorithm from Auer et al. (2002), "The Nonstochastic Multiarmed
+    Bandit Problem", with parameters chosen to guarantee
+    O(\sqrt{K T \ln(K/\delta)}) regret with probability 1-\delta.
+
+    Hyperparameters:
+      - K: number of arms
+      - T: time horizon
+      - delta: failure probability (confidence parameter)
+
+    Theoretical parameter settings:
+      gamma = min\bigl(1, \sqrt{ K * ln(K/delta) / ( (e-1) * T ) }\bigr)
+      beta  = ln(K/delta) / K
+      eta   = gamma / K
+
+    On each round t:
+      1. Compute sampling distribution p_t:
+           p_{i,t} = (1-gamma)*exp(eta * G_i) / sum_j exp(eta * G_j) + gamma/K
+      2. Draw I_t ~ p_t and observe reward g in [0,1]
+      3. Form importance-weighted reward + bias:
+           x_hat = (g + beta) / p_{I_t,t}
+           B     = beta / p_t  # vector of length K
+      4. Update cumulative pseudo-rewards:
+           G_{I_t} += x_hat
+           G       += B
+
+    References:
+      - Auer, Nicoló, Peter Auer, Nicoló Cesa-Bianchi, Yoav Freund, Robert E.
+        Schapire. "The Nonstochastic Multiarmed Bandit Problem." SIAM Journal on
+        Computing, 2002.
+    """
 
     def __init__(self, K: int, T: int, delta: float = 0.1):
         self.K = K
-        self.gamma = min(1.0, math.sqrt(
-            (K * math.log(K / delta)) / ((math.e - 1) * T)))
-        self.alpha = (math.log(K / delta) / K) * \
-            math.sqrt(1 / ((math.e - 1) * T))
-        self.weights = np.ones(K)
+        self.T = T
+        self.delta = delta
+        self.gamma = min(
+            1.0,
+            math.sqrt((K * math.log(K / delta)) / ((math.e - 1) * T))
+        )
+        self.beta = math.log(K / delta) / K
+        self.eta = self.gamma / K
+        self.G = np.zeros(K)
         self.probs = np.ones(K) / K
         self.t = 0
 
-    def get_probs(self) -> np.ndarray:
-        W = np.sum(self.weights)
-        base = (1 - self.gamma) * (self.weights / W)
-        return base + self.gamma / self.K
+    def _compute_probs(self) -> np.ndarray:
+        # subtract max for numerical stability
+        scaled_G = self.eta * self.G
+        max_scaled = np.max(scaled_G)
+        expG = np.exp(scaled_G - max_scaled)
+        base = (1 - self.gamma) * (expG / expG.sum())
+        # add exploration component
+        probs = base + self.gamma / self.K
+        # normalize and clip tiny values
+        probs = probs / probs.sum()
+        probs = np.clip(probs, 1e-12, 1.0)
+        # re-normalize in case of clipping
+        return probs / probs.sum()
 
     def pull_arm(self) -> int:
-        self.probs = self.get_probs()
+        self.probs = self._compute_probs()
         choice = int(np.random.choice(self.K, p=self.probs))
         self.t += 1
         return choice
 
     def update(self, chosen: int, reward: float) -> None:
-        # reward in [0,1]
-        p = self.probs[chosen]
-        x_hat = reward / p
-        # correction term for variance
-        correction = self.alpha / (p * math.sqrt(self.K * self.t))
-        self.weights[chosen] *= math.exp((self.gamma *
-                                         x_hat + correction) / self.K)
+        p_chosen = self.probs[chosen]
+        # safeguard p_chosen in case of extreme values
+        if p_chosen < 1e-12:
+            p_chosen = 1e-12
+        x_hat = (reward + self.beta) / p_chosen
+        bias_vec = self.beta / self.probs
+        self.G[chosen] += x_hat
+        self.G += bias_vec
 
 
 class MultiProductPDExp3PricingAgent:
@@ -472,6 +582,7 @@ class MultiProductPDExp3PricingAgent:
         self.n_products = n_products
         self.B = B
         self.rho = B / (n_products * T)
+        self.last_choices: List[Optional[int]] = []
         # EXP3.P parameters
         self.delta = delta
         self.sub_agents = [Exp3PAgent(self.K, T, delta)
@@ -480,50 +591,49 @@ class MultiProductPDExp3PricingAgent:
         self.eta = eta if eta is not None else 1 / math.sqrt(n_products * T)
         self.lmbd = 1.0
         self.t = 0
+        self.lmbd_history: List[float] = []
 
     def pull_arm(self) -> List[Optional[int]]:
         if self.B < 1:
-            return [None] * self.n_products
-        choices = [agent.pull_arm() for agent in self.sub_agents]
-        return choices
+            self.last_choices = [None] * self.n_products
+        else:
+            self.last_choices = [agent.pull_arm() for agent in self.sub_agents]
+        return self.last_choices
 
     def update(self, values: np.ndarray) -> Tuple[float, int]:
-        # Bandit feedback: only see chosen arms' sales
-        choices = self.pull_arm()
+        if not hasattr(self, "last_choices"):
+            raise ValueError(
+                "No stored arm choices. Call pull_arm() before update().")
+
         total_revenue = 0.0
         total_sales = 0
-
         p_max = self.prices.max()
         for j, agent in enumerate(self.sub_agents):
-            choice = choices[j]
+            choice = self.last_choices[j]
             if choice is None:
+                print(f"Agent {j} chose None, skipping update.")
                 continue
             price = self.prices[choice]
             val = float(values[j])
             sale = 1.0 if price <= val else 0.0
 
-            # primal reward: price * sale
             reward = price * sale
             total_revenue += reward
             total_sales += int(sale)
 
-            # dual penalty term: (sale - rho)
             penalty = self.lmbd * (sale - self.rho)
-            # net reward normalized to [0,1]
             net = reward - penalty
             net_norm = (net + p_max) / (2 * p_max)
 
-            # update EXP3.P sub-agent
-            agent.probs = agent.get_probs()
+            # update EXP3.P sub-agent based on the stored choice
+            agent.probs = agent._compute_probs()
             agent.update(choice, net_norm)
 
-        # update dual variable lambda
         self.lmbd = np.clip(
             self.lmbd - self.eta * (self.rho * self.n_products - total_sales),
             a_min=0.0, a_max=1/self.rho
         )
-
         self.B -= total_sales
         self.t += 1
-
+        self.lmbd_history.append(self.lmbd)
         return total_revenue, total_sales

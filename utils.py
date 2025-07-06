@@ -184,6 +184,9 @@ def compute_extended_clairvoyant(V, prices, total_inventory):
     gamma = res.x.reshape((m_env, K))
     expected_utility = -res.fun
     expected_cost = np.dot(s.flatten(), res.x)
+    print(f"Expected utility: {expected_utility:.4f}")
+    print(f"Optimal distribution (gamma): {gamma}")
+    print(f"Expected cost: {expected_cost:.4f}")
 
     return expected_utility, gamma, expected_cost
 
