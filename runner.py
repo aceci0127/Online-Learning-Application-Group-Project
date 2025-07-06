@@ -2,7 +2,13 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Any
 import time
+from enum import Enum
 
+class Distribution(Enum):
+    NORMAL = "normal"
+    UNIFORM = "uniform"
+    EXPONENTIAL = "exponential"
+    BETA = "beta"
 
 @dataclass
 class ExperimentConfig:
@@ -14,6 +20,7 @@ class ExperimentConfig:
     prices: np.ndarray
     n_products: int = 1
     n_windows: int = 1
+    distribution: Distribution = Distribution.NORMAL
     budget: Optional[int] = None
 
     def __post_init__(self):
@@ -47,7 +54,7 @@ class StandardExperimentRunner:
         raise NotImplementedError(
             "Subclasses must implement create_environment")
 
-    def create_agent(self, trial_seed: int):
+    def create_agent(self):
         """Factory method for creating agents - override for specific tasks"""
         raise NotImplementedError("Subclasses must implement create_agent")
 

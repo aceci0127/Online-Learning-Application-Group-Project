@@ -10,6 +10,7 @@ from data_generators import (
     generate_piecewise_tv_mv_gauss,
     generate_flattened_valuation_data
 )
+from runner import Distribution
 
 
 class Environment(ABC):
@@ -24,7 +25,7 @@ class Environment(ABC):
 class PricingEnvironment(Environment):
     """Environment for simple pricing with uniform valuations"""
 
-    def __init__(self, prices: Union[List[float], np.ndarray], T: int, rng: Optional[np.random.Generator] = None) -> None:
+    def __init__(self, prices: Union[List[float], np.ndarray], T: int, rng: Optional[np.random.Generator] = None, distribution: Distribution = Distribution.UNIFORM) -> None:
         self.prices: np.ndarray = np.array(prices)
         self.m: int = len(prices)
         self.T: int = T
@@ -32,7 +33,12 @@ class PricingEnvironment(Environment):
         if rng is None:
             rng = np.random.default_rng()
         self._rng: np.random.Generator = rng
-        self.valuations: np.ndarray = self._rng.uniform(0, 1, size=T)
+        if distribution == Distribution.BETA:
+            self.valuations: np.ndarray = self._rng.beta(0.5, 2, size=T)
+        elif distribution == Distribution.UNIFORM:
+            self.valuations = self._rng.uniform(0, 1, size=T)
+        else:
+            raise ValueError(f"Unsupported distribution: {distribution}")
 
     def round(self, arm_index: int) -> float:
         chosen_price: float = self.prices[arm_index]
@@ -59,7 +65,7 @@ class BudgetedPricingEnvironment(Environment):
             self.vals: np.ndarray = beta(
                 self.alpha, self.beta).rvs(size=T, random_state=rng)
         elif distribution == 'uniform':
-            self.vals: np.ndarray = rng.uniform(0, 1, size=T)
+            self.vals = rng.uniform(0, 1, size=T)
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 
@@ -89,12 +95,12 @@ class NonStationaryBudgetedPricingEnvironment(Environment):
         self.rng: np.random.Generator = rng
         if valuation_type == 'beta':
             self.valuations: np.ndarray = generate_beta_valuations(
-                T, shock_prob, freq, rng=rng)
+                T, shock_prob, freq or 1.0, rng=rng)
         elif valuation_type == 'sinusoidal':
-            self.valuations: np.ndarray = generate_valuations(
-                T, shock_prob, freq, rng=rng)
+            self.valuations = generate_valuations(
+                T, shock_prob, freq or 1.0, rng=rng)
         elif valuation_type == 'piecewise_beta':
-            self.valuations: np.ndarray = generate_piecewise_beta_valuations(
+            self.valuations = generate_piecewise_beta_valuations(
                 T, shock_prob, num_regimes, rng=rng)
         else:
             raise ValueError(
