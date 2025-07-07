@@ -62,7 +62,7 @@ class BudgetedPricingEnvironment(Environment):
         if distribution == Distribution.BETA:
             self.vals: np.ndarray = self._rng.beta(0.5, 2, size=T)
         elif distribution == Distribution.UNIFORM:
-            self.vals = rng.uniform(0, 1, size=T)
+            self.vals = self._rng.uniform(0, 1, size=T)
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 

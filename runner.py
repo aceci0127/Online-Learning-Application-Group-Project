@@ -20,7 +20,7 @@ class ExperimentConfig:
     prices: np.ndarray
     n_products: int = 1
     n_windows: int = 1
-    distribution: Distribution = Distribution.NORMAL
+    distribution: Distribution = Distribution.UNIFORM
     budget: Optional[float] = None
 
     def __post_init__(self):
