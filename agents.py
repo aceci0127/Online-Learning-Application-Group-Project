@@ -531,7 +531,6 @@ class Exp3PAgent(Agent):
         self.eta = self.gamma / K
         self.G = np.zeros(K)
         self.probs = np.ones(K) / K
-        self.t = 0
 
     def _compute_probs(self) -> np.ndarray:
         # subtract max for numerical stability
@@ -550,7 +549,6 @@ class Exp3PAgent(Agent):
     def pull_arm(self) -> int:
         self.probs = self._compute_probs()
         choice = int(np.random.choice(self.K, p=self.probs))
-        self.t += 1
         return choice
 
     def update(self, chosen: int, reward: float) -> None:
@@ -564,7 +562,7 @@ class Exp3PAgent(Agent):
         self.G += bias_vec
 
 
-class MultiProductPDExp3PricingAgent:
+class MultiProductPDExp3PricingAgent(Agent):
     """Primal-Dual agent using EXP3.P bandit feedback for multi-product pricing"""
 
     def __init__(
@@ -582,7 +580,7 @@ class MultiProductPDExp3PricingAgent:
         self.n_products = n_products
         self.B = B
         self.rho = B / (n_products * T)
-        self.last_choices: List[Optional[int]] = []
+        self.last_choices: Optional[List[int]] = None
         # EXP3.P parameters
         self.delta = delta
         self.sub_agents = [Exp3PAgent(self.K, T, delta)
@@ -590,29 +588,22 @@ class MultiProductPDExp3PricingAgent:
         # Dual step size
         self.eta = eta if eta is not None else 1 / math.sqrt(n_products * T)
         self.lmbd = 1.0
-        self.t = 0
         self.lmbd_history: List[float] = []
 
-    def pull_arm(self) -> List[Optional[int]]:
+    def pull_arm(self) -> Optional[List[int]]:
         if self.B < 1:
-            self.last_choices = [None] * self.n_products
-        else:
-            self.last_choices = [agent.pull_arm() for agent in self.sub_agents]
+            return None
+        self.last_choices = [agent.pull_arm() for agent in self.sub_agents]
         return self.last_choices
 
     def update(self, values: np.ndarray) -> Tuple[float, int]:
-        if not hasattr(self, "last_choices"):
-            raise ValueError(
-                "No stored arm choices. Call pull_arm() before update().")
-
         total_revenue = 0.0
         total_sales = 0
         p_max = self.prices.max()
         for j, agent in enumerate(self.sub_agents):
-            choice = self.last_choices[j]
-            if choice is None:
-                print(f"Agent {j} chose None, skipping update.")
+            if self.last_choices is None:
                 continue
+            choice = self.last_choices[j]
             price = self.prices[choice]
             val = float(values[j])
             sale = 1.0 if price <= val else 0.0
@@ -634,6 +625,5 @@ class MultiProductPDExp3PricingAgent:
             a_min=0.0, a_max=1/self.rho
         )
         self.B -= total_sales
-        self.t += 1
         self.lmbd_history.append(self.lmbd)
         return total_revenue, total_sales

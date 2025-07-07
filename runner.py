@@ -28,7 +28,7 @@ class ExperimentConfig:
     n_products: int = 1
     n_windows: int = 1
     distribution: Distribution = Distribution.UNIFORM
-    budget: Optional[float] = None
+    budget: float = 1000.0
 
     def __post_init__(self):
         pass
