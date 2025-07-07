@@ -51,20 +51,17 @@ class PricingEnvironment(Environment):
 class BudgetedPricingEnvironment(Environment):
     """Environment for pricing with limited budget"""
 
-    def __init__(self, prices: Union[List[float], np.ndarray], T: int, distribution: str = 'uniform',
+    def __init__(self, prices: Union[List[float], np.ndarray], T: int, distribution: Distribution = Distribution.UNIFORM,
                  rng: Optional[np.random.Generator] = None) -> None:
         self.prices: np.ndarray = np.array(prices)
         self.T: int = T
         self.t: int = 0
         if rng is None:
             rng = np.random.default_rng()
-        self.rng: np.random.Generator = rng
-        if distribution == 'beta':
-            self.alpha: int = 60
-            self.beta: int = 40
-            self.vals: np.ndarray = beta(
-                self.alpha, self.beta).rvs(size=T, random_state=rng)
-        elif distribution == 'uniform':
+        self._rng: np.random.Generator = rng
+        if distribution == Distribution.BETA:
+            self.vals: np.ndarray = self._rng.beta(0.5, 2, size=T)
+        elif distribution == Distribution.UNIFORM:
             self.vals = rng.uniform(0, 1, size=T)
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
@@ -133,14 +130,19 @@ class MultiProductPricingEnvironment(Environment):
     """Environment for multi-product pricing"""
 
     def __init__(self, price_grid: List[np.ndarray], T: int,
-                 rng: Optional[np.random.Generator] = None) -> None:
+                 rng: Optional[np.random.Generator] = None, distribution: Distribution = Distribution.UNIFORM) -> None:
         self.price_grid: List[np.ndarray] = price_grid
         self.N: int = len(price_grid)
         self.T: int = T
         self.t: int = 0
         self.rng: np.random.Generator = rng if rng is not None else np.random.default_rng()
-        # Generate uniform valuations for each round and product (T x N)
-        self.vals: np.ndarray = self.rng.uniform(0, 1, size=(T, self.N))
+
+        if distribution == Distribution.UNIFORM:
+            self.vals: np.ndarray = self.rng.uniform(0, 1, size=(T, self.N))
+        elif distribution == Distribution.BETA:
+            self.vals: np.ndarray = self.rng.beta(0.5, 2, size=(T, self.N))
+        else:
+            raise ValueError(f"Unsupported distribution: {distribution}")
 
     def round(self, price_indices: List[int]) -> Tuple[np.ndarray, np.ndarray]:
         vs: np.ndarray = self.vals[self.t]

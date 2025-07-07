@@ -76,7 +76,7 @@ def compute_sell_probabilities_multi(V, prices):
     return s
 
 
-def solve_clairvoyant_lp(price_grid, B, T):
+def solve_clairvoyant_lp(price_grid, B, T, f_true, c_true):
     """
     Solves the clairvoyant per-round LP for given price grids, budget, and horizon.
 
@@ -91,14 +91,6 @@ def solve_clairvoyant_lp(price_grid, B, T):
     # pacing constraint
     rho = B / T
 
-    # Compute true expected reward and consumption for uniform[0,1] valuations
-    f_true = [p * np.maximum(0, (1 - p))
-              for p in price_grid]  # expected revenue
-    # expected consumption/probability
-    c_true = [np.maximum(0, 1 - p) for p in price_grid]
-    print("Expected revenue per price (f_true):", f_true)
-    print("Expected consumption per price (c_true):", c_true)
-    # Flatten variables for LP
     f_flat = np.concatenate(f_true)
     c_flat = np.concatenate(c_true)
     num_vars = len(f_flat)

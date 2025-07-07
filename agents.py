@@ -63,7 +63,7 @@ class ConstrainedUCBPricingAgent(Agent):
         self.avg_c: np.ndarray = np.zeros(K)
         self.N_pulls: np.ndarray = np.zeros(K)
         self.rng = np.random.default_rng()
-        self.rem_budget: float = B
+        self.rem_budget: float = B 
         self.budget: float = B
         self.rho: float = B / T
         self.t: int = 0

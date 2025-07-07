@@ -21,7 +21,7 @@ class ExperimentConfig:
     n_products: int = 1
     n_windows: int = 1
     distribution: Distribution = Distribution.NORMAL
-    budget: Optional[int] = None
+    budget: Optional[float] = None
 
     def __post_init__(self):
         pass
