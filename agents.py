@@ -54,7 +54,7 @@ class UCB1PricingAgent(Agent):
 class ConstrainedUCBPricingAgent(Agent):
     """Constrained UCB agent for pricing with budget"""
 
-    def __init__(self, K: int, B: float, T: int, alpha: float = 2) -> None:
+    def __init__(self, K: int, B: float, T: int, alpha: float = 2, adaptive_rho: bool = False) -> None:
         self.K: int = K
         self.T: int = T
         self.alpha: float = alpha
@@ -67,7 +67,7 @@ class ConstrainedUCBPricingAgent(Agent):
         self.budget: float = B
         self.rho: float = B / T
         self.t: int = 0
-
+        self.adaptive_rho: bool = adaptive_rho
     def pull_arm(self) -> Optional[int]:
         if self.rem_budget < 1:
             self.a_t = None
@@ -92,7 +92,10 @@ class ConstrainedUCBPricingAgent(Agent):
     def compute_opt(self, f_ucbs: np.ndarray, c_lcbs: np.ndarray) -> np.ndarray:
         c = -f_ucbs
         A_ub = [c_lcbs]
-        b_ub = [self.rho]
+        if self.adaptive_rho:
+            b_ub = [self.rho]
+        else:
+            b_ub = [self.rem_budget / (self.T - self.t + 1)]
         A_eq = [np.ones(self.K)]
         b_eq = [1]
         res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq,

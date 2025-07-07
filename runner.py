@@ -31,6 +31,7 @@ class ExperimentConfig:
     distribution: Union[Distribution,
                         List[Distribution]] = Distribution.UNIFORM
     budget: float = 1000.0
+    adaptive_rho: bool = False
 
     def __post_init__(self):
         pass
@@ -231,7 +232,8 @@ class MultiDistributionRunner:
                 n_products=self.config.n_products,
                 n_windows=self.config.n_windows,
                 distribution=dist,
-                budget=self.config.budget
+                budget=self.config.budget,
+                adaptive_rho=self.config.adaptive_rho
             )
 
             runner = self.runner_class(single_config)
