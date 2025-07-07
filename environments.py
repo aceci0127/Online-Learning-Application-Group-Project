@@ -133,9 +133,9 @@ class MultiProductPricingEnvironment(Environment):
         self.rng: np.random.Generator = rng if rng is not None else np.random.default_rng()
 
         if distribution == Distribution.UNIFORM:
-            self.vals: np.ndarray = self.rng.uniform(0, 1, size=(T, self.N))
+            self.vals = self.rng.uniform(0, 1, size=(T, self.N))
         elif distribution == Distribution.BETA:
-            self.vals: np.ndarray = self.rng.beta(0.5, 2, size=(T, self.N))
+            self.vals = self.rng.beta(0.5, 2, size=(T, self.N))
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 
@@ -155,15 +155,14 @@ class MultiProductPricingEnvironment(Environment):
 class MultiProductBudgetedPricingEnvironment(Environment):
     """Environment for multi-product pricing with budget and full feedback"""
 
-    def __init__(self, prices: Union[List[float], np.ndarray], T: int, m: int, valuation_params: dict,
-                 valuation_type: str = 'simple_tv',
+    def __init__(self, T: int, n_products: int, valuation_params: dict,
+                 distribution: Distribution = Distribution.SIMPLE_TV,
                  rng: Optional[np.random.Generator] = None) -> None:
-        self.prices: np.ndarray = np.array(prices)
         self.T: int = T
-        self.m: int = m
+        self.n_products: int = n_products
         self.t: int = 0
         self.rng: np.random.Generator = rng or np.random.default_rng(0)
-        if valuation_type == 'simple_tv':
+        if distribution == Distribution.SIMPLE_TV:
             mu0: float = valuation_params['mu0']
             A: float = valuation_params['A']
             f: float = valuation_params['f']
@@ -172,20 +171,31 @@ class MultiProductBudgetedPricingEnvironment(Environment):
             A_sigma: float = valuation_params['A_sigma']
             phi_sigma: float = valuation_params['phi_sigma']
             rho0: float = valuation_params['rho0']
-            self.V, _ = generate_simple_tv_mv_gauss(
-                T, m, mu0, A, f, phi, sigma0, A_sigma, phi_sigma, rho0, rng=rng)
-        elif valuation_type == 'piecewise_tv':
+            self.valuations, _ = generate_simple_tv_mv_gauss(
+                T,
+                n_products,
+                mu0=mu0,
+                A=A,
+                f=f,
+                phi=phi,
+                sigma0=sigma0,
+                A_sigma=A_sigma,
+                phi_sigma=phi_sigma,
+                rho0=rho0,
+                rng=self.rng
+            )
+        elif distribution == Distribution.PIECEWISE_TV:
             num_regimes: int = valuation_params.get('num_regimes', 10000)
-            self.V, _ = generate_piecewise_tv_mv_gauss(
-                T, m, num_regimes, rng=rng)
+            self.valuations, _ = generate_piecewise_tv_mv_gauss(
+                T, n_products, num_regimes, rng=self.rng)
         else:
             raise ValueError(
-                f"Tipo di valutazione non supportato: {valuation_type}")
+                f"Tipo di valutazione non supportato: {distribution}")
 
-    def round(self) -> np.ndarray:
+    def round(self, round: int) -> np.ndarray:
         if self.t >= self.T:
             raise RuntimeError("Orizzonte temporale superato!")
-        v_t: np.ndarray = self.V[self.t]
+        v_t: np.ndarray = self.valuations[self.t]
         self.t += 1
         return v_t
 

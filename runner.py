@@ -12,6 +12,9 @@ class Distribution(Enum):
     BETA = "beta"
     SINUSOIDAL = "sinusoidal"
     PIECEWISE_BETA = "piecewise_beta"
+    SIMPLE_TV = "simple_tv"
+    PIECEWISE_TV = "piecewise_tv"
+    PIECEWISE_SINUSOIDAL = "piecewise_sinusoidal"
 
 
 @dataclass
