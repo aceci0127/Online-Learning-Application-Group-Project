@@ -4,11 +4,15 @@ from typing import List, Optional, Tuple, Any
 import time
 from enum import Enum
 
+
 class Distribution(Enum):
     NORMAL = "normal"
     UNIFORM = "uniform"
     EXPONENTIAL = "exponential"
     BETA = "beta"
+    SINUSOIDAL = "sinusoidal"
+    PIECEWISE_BETA = "piecewise_beta"
+
 
 @dataclass
 class ExperimentConfig:
@@ -85,8 +89,8 @@ class StandardExperimentRunner:
         trial_seed = self.config.seed + trial
         np.random.seed(trial_seed)
 
-        env = self.create_environment(trial_seed)
-        agent = self.create_agent()
+        self.env = self.create_environment(trial_seed)
+        self.agent = self.create_agent()
 
         regrets = []
         units_sold = []
@@ -97,20 +101,23 @@ class StandardExperimentRunner:
         clairvoyant_reward = self.compute_clairvoyant_reward()
 
         for t in range(self.config.horizon):
-            action = agent.pull_arm()
+            action = self.agent.pull_arm()
 
             if action is None:
                 print(f"Trial {trial+1}: Agent stopped at round {t}.", end=" ")
                 break
 
-            result = env.round(action)
+            env_result = self.env.round(action)
 
-            if isinstance(result, tuple):
-                agent.update(*result)
+            if isinstance(env_result, tuple):
+                agent_result = self.agent.update(*env_result)
             else:
-                agent.update(result)
+                agent_result = self.agent.update(env_result)
 
-            reward, cost = self.extract_metrics(result)
+            if agent_result is not None:
+                reward, cost = self.extract_metrics(agent_result)
+            else:
+                reward, cost = self.extract_metrics(env_result)
 
             cum_reward += reward
             cum_units += cost
@@ -121,7 +128,7 @@ class StandardExperimentRunner:
             regrets.append(cum_regret)
             units_sold.append(int(cum_units))
 
-        return regrets, units_sold, cum_reward, agent
+        return regrets, units_sold, cum_reward, self.agent
 
     def run_experiment(self) -> ExperimentResult:
         """Run the complete experiment"""

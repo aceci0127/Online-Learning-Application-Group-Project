@@ -4,7 +4,7 @@ from scipy.stats import beta
 from typing import List, Optional, Tuple, Union
 from data_generators import (
     generate_beta_valuations,
-    generate_valuations,
+    generate_sinusoidal_valuations,
     generate_piecewise_beta_valuations,
     generate_simple_tv_mv_gauss,
     generate_piecewise_tv_mv_gauss,
@@ -79,29 +79,24 @@ class NonStationaryBudgetedPricingEnvironment(Environment):
     """Environment for non-stationary pricing with full feedback"""
 
     def __init__(self, prices: Union[List[float], np.ndarray], T: int, shock_prob: float,
-                 freq: Optional[int] = None, num_regimes: int = 10000,
-                 valuation_type: str = 'piecewise_beta',
-                 rng: Optional[np.random.Generator] = None) -> None:
+                 freq: int, num_regimes: int = 10000,
+                 distribution: Distribution = Distribution.BETA, rng: Optional[np.random.Generator] = None) -> None:
         self.prices: np.ndarray = np.array(prices)
         self.T: int = T
         self.t: int = 0
-        self.shock_prob: float = shock_prob
-        self.freq: Optional[int] = freq
-        if rng is None:
-            rng = np.random.default_rng()
-        self.rng: np.random.Generator = rng
-        if valuation_type == 'beta':
+        self.freq: int = freq
+        self.rng: np.random.Generator = rng or np.random.default_rng()
+        if distribution == Distribution.BETA:
             self.valuations: np.ndarray = generate_beta_valuations(
-                T, shock_prob, freq or 1.0, rng=rng)
-        elif valuation_type == 'sinusoidal':
-            self.valuations = generate_valuations(
-                T, shock_prob, freq or 1.0, rng=rng)
-        elif valuation_type == 'piecewise_beta':
+                T, freq, rng=self.rng)
+        elif distribution == Distribution.SINUSOIDAL:
+            self.valuations = generate_sinusoidal_valuations(
+                T, freq, rng=self.rng, shock_prob=shock_prob)
+        elif distribution == Distribution.PIECEWISE_BETA:
             self.valuations = generate_piecewise_beta_valuations(
-                T, shock_prob, num_regimes, rng=rng)
+                T, shock_prob, num_regimes, rng=self.rng)
         else:
-            raise ValueError(
-                f"Tipo di valutazione non supportato: {valuation_type}")
+            raise ValueError(f"Unsupported distribution: {distribution}")
 
     def bandit_round(self, price_index: int) -> Tuple[float, float]:
         """Round with bandit feedback (only reward for the chosen arm)"""
@@ -112,7 +107,7 @@ class NonStationaryBudgetedPricingEnvironment(Environment):
         self.t += 1
         return reward, cost
 
-    def round(self) -> float:
+    def round(self, round: int) -> float:
         """Round with full feedback (returns the valuation)"""
         valuation: float = float(self.valuations[self.t])
         self.t += 1

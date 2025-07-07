@@ -9,10 +9,8 @@ def pattern(t: int, T: int, freq: float) -> float:
     return 1 - abs(np.sin(freq * t / T))
 
 
-def generate_beta_valuations(T: int, shock_prob: float, freq: float, rng: Optional[np.random.Generator] = None) -> np.ndarray:
+def generate_beta_valuations(T: int, freq: int, rng: np.random.Generator) -> np.ndarray:
     """Generate Beta valuations with oscillating parameters"""
-    if rng is None:
-        rng = np.random.default_rng()
     valuations: np.ndarray = np.empty(T)
     for t in range(T):
         # Oscillating Alpha and Beta parameters
@@ -22,10 +20,8 @@ def generate_beta_valuations(T: int, shock_prob: float, freq: float, rng: Option
     return valuations
 
 
-def generate_valuations(T: int, shock_prob: float, freq: float, rng: Optional[np.random.Generator] = None) -> np.ndarray:
+def generate_sinusoidal_valuations(T: int, freq: int, rng: np.random.Generator, shock_prob: float) -> np.ndarray:
     """Generate sequence of valuations with occasional adversarial shocks"""
-    if rng is None:
-        rng = np.random.default_rng()
     valuations: np.ndarray = np.empty(T)
     for t in range(T):
         a_t = pattern(t, T, freq)
@@ -36,10 +32,8 @@ def generate_valuations(T: int, shock_prob: float, freq: float, rng: Optional[np
     return valuations
 
 
-def generate_piecewise_beta_valuations(T: int, shock_prob: float, num_regimes: int, rng: Optional[np.random.Generator] = None) -> np.ndarray:
+def generate_piecewise_beta_valuations(T: int, shock_prob: float, num_regimes: int, rng) -> np.ndarray:
     """Generate piecewise-stationary Beta distribution valuations"""
-    if rng is None:
-        rng = np.random.default_rng()
     valuations: np.ndarray = np.empty(T)
     regime_length: int = T // num_regimes
     for regime in range(num_regimes):
