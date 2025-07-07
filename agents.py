@@ -135,7 +135,7 @@ class ConstrainedCombinatorialUCBAgent(Agent):
         self.N_pulls: List[np.ndarray] = [np.zeros(K) for K in self.Ks]
         self.avg_f: List[np.ndarray] = [np.zeros(K) for K in self.Ks]
         self.avg_c: List[np.ndarray] = [np.zeros(K) for K in self.Ks]
-        self.current_choice: Optional[Tuple[int, ...]] = None
+        self.current_choice: List[int] = []
 
     def _solve_marginal_lp(self, f_ucb: List[np.ndarray], c_lcb: List[np.ndarray], rho: float) -> List[np.ndarray]:
         f_flat: np.ndarray = np.concatenate(f_ucb)
@@ -170,7 +170,7 @@ class ConstrainedCombinatorialUCBAgent(Agent):
             offset += K
         return marginals
 
-    def pull_arm(self) -> Optional[Tuple[int, ...]]:
+    def pull_arm(self) -> Optional[List[int]]:
         if self.B_rem < 1 or self.t >= self.T:
             return None
 
@@ -191,8 +191,8 @@ class ConstrainedCombinatorialUCBAgent(Agent):
 
         marginals: List[np.ndarray] = self._solve_marginal_lp(
             f_ucb, c_lcb, self.rho)
-        choice: Tuple[int, ...] = tuple(
-            int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N))
+        choice: List[int] = [
+            int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N)]
         self.current_choice = choice
         return choice
 
@@ -377,14 +377,14 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
         self.hedge_prob_history: List[List[np.ndarray]] = [
             [] for _ in range(n_products)]
 
-    def pull_arm(self) -> List[Optional[int]]:
+    def pull_arm(self) -> Optional[List[int]]:
         if self.B < 1:
-            return [None] * self.n_products
-        arms: List[Optional[int]] = [hedge.pull_arm() for hedge in self.hedges]
+            return None
+        arms: List[int] = [hedge.pull_arm() for hedge in self.hedges]
         return arms
 
     def update(self, v_t: np.ndarray) -> Tuple[float, int]:
-        arms: List[Optional[int]] = self.pull_arm()
+        arms: List[int] | None = self.pull_arm()
         total_revenue: float = 0.0
         total_units_sold: int = 0
         losses: List[np.ndarray] = []
@@ -394,10 +394,10 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
         norm_factor: float = L_up - L_low + 1e-12
 
         for j in range(self.n_products):
-            arm: Optional[int] = arms[j]
-            if arm is None:
+            if arms is None:
                 losses.append(np.zeros(self.K))
                 continue
+            arm: int = arms[j]
 
             p_chosen: float = self.prices[arm]
             val_j: float = float(v_t[j])
@@ -436,7 +436,7 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
         self.samples: List[List[deque]] = [[deque() for _ in range(K)]
                                            for K in self.Ks]
 
-    def pull_arm(self) -> Optional[Tuple[int, ...]]:
+    def pull_arm(self) -> Optional[List[int]]:
         if self.B_rem < 1 or self.t >= self.T:
             return None
 
@@ -452,10 +452,10 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
                     self.samples[j][k].popleft()
                 samples: deque = self.samples[j][k]
                 n: int = len(samples)
-                avg_reward: float = np.mean(
-                    [item[1] for item in samples]) if n > 0 else 0.0
-                avg_cost: float = np.mean(
-                    [item[2] for item in samples]) if n > 0 else 0.0
+                avg_reward: float = float(np.mean(
+                    [item[1] for item in samples])) if n > 0 else 0.0
+                avg_cost: float = float(np.mean(
+                    [item[2] for item in samples])) if n > 0 else 0.0
                 n_j_vals.append(n)
                 f_j_vals.append(avg_reward)
                 c_j_vals.append(avg_cost)
@@ -470,8 +470,8 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
             c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
         marginals: List[np.ndarray] = self._solve_marginal_lp(
             f_ucb, c_lcb, self.rho)
-        choice: Tuple[int, ...] = tuple(
-            int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N))
+        choice: List[int] = [
+            int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N)]
         self.current_choice = choice
         return choice
 

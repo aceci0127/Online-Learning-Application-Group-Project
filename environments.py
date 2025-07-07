@@ -219,7 +219,7 @@ class SmoothMultiProductPricingEnvironment:
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 
-    def round(self, price_indices: List[int]) -> Tuple[np.ndarray, np.ndarray]:
+    def round(self, price_indices: List[int]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         vs: np.ndarray = self.valuations[self.t]
         rewards: np.ndarray = np.zeros(self.N)
         costs: np.ndarray = np.zeros(self.N)
@@ -229,4 +229,4 @@ class SmoothMultiProductPricingEnvironment:
                 rewards[j] = p
                 costs[j] = 1.0
         self.t += 1
-        return rewards, costs
+        return rewards, costs, vs
