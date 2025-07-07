@@ -180,7 +180,7 @@ class StandardPlotter:
                              label=f"Product {j+1} | Arm {k}")
             axes[j].set_xlabel("Update Number")
             axes[j].set_ylabel("Probability")
-            axes[j].set_title(f"Product {j+1} Hedge Probabilities")
+            axes[j].set_title(title)
             axes[j].grid(alpha=0.4)
         plt.tight_layout()
         plt.show()

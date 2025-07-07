@@ -8,7 +8,7 @@ from data_generators import (
     generate_piecewise_beta_valuations,
     generate_simple_tv_mv_gauss,
     generate_piecewise_tv_mv_gauss,
-    generate_flattened_valuation_data
+    generate_smooth_valuation_data
 )
 from runner import Distribution
 
@@ -156,12 +156,11 @@ class MultiProductBudgetedPricingEnvironment(Environment):
     """Environment for multi-product pricing with budget and full feedback"""
 
     def __init__(self, T: int, n_products: int, valuation_params: dict,
-                 distribution: Distribution = Distribution.SIMPLE_TV,
-                 rng: Optional[np.random.Generator] = None) -> None:
+                 rng: np.random.Generator, distribution: Distribution = Distribution.SIMPLE_TV) -> None:
         self.T: int = T
         self.n_products: int = n_products
         self.t: int = 0
-        self.rng: np.random.Generator = rng or np.random.default_rng(0)
+        self.rng: np.random.Generator = rng
         if distribution == Distribution.SIMPLE_TV:
             mu0: float = valuation_params['mu0']
             A: float = valuation_params['A']
@@ -201,17 +200,27 @@ class MultiProductBudgetedPricingEnvironment(Environment):
 
 
 class SmoothMultiProductPricingEnvironment:
-    def __init__(self, price_grid: List[np.ndarray], T: int, valuations: np.ndarray,
-                 rng: np.random.Generator) -> None:
+    def __init__(self, price_grid: List[np.ndarray], T: int, n_products: int, num_windows: int,
+                 rng: np.random.Generator, distribution: Distribution = Distribution.SMOOTH) -> None:
         self.price_grid: List[np.ndarray] = price_grid
         self.N: int = len(price_grid)
         self.T: int = T
         self.t: int = 0
         self.rng: np.random.Generator = rng
-        self.vals: np.ndarray = valuations
+        self.n_products: int = n_products
+        self.num_windows: int = num_windows
+        self.distribution: Distribution = distribution
 
-    def round(self, price_indices: List[int]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        vs: np.ndarray = self.vals[self.t]
+        if distribution == Distribution.SMOOTH:
+            self.expected_means, self.valuations = generate_smooth_valuation_data(
+                T, K=self.num_windows, M=self.n_products,
+                max_jump=0.02, transition_frac=0.2, concentration=10, rng=self.rng
+            )
+        else:
+            raise ValueError(f"Unsupported distribution: {distribution}")
+
+    def round(self, price_indices: List[int]) -> Tuple[np.ndarray, np.ndarray]:
+        vs: np.ndarray = self.valuations[self.t]
         rewards: np.ndarray = np.zeros(self.N)
         costs: np.ndarray = np.zeros(self.N)
         for j, idx in enumerate(price_indices):
@@ -220,4 +229,4 @@ class SmoothMultiProductPricingEnvironment:
                 rewards[j] = p
                 costs[j] = 1.0
         self.t += 1
-        return rewards, costs, vs
+        return rewards, costs

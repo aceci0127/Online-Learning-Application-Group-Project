@@ -15,7 +15,7 @@ class Distribution(Enum):
     SIMPLE_TV = "simple_tv"
     PIECEWISE_TV = "piecewise_tv"
     PIECEWISE_SINUSOIDAL = "piecewise_sinusoidal"
-
+    SMOOTH = "smooth"
 
 @dataclass
 class ExperimentConfig:
