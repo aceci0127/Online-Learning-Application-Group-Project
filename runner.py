@@ -9,8 +9,8 @@ class Distribution(Enum):
     NORMAL = "normal"
     UNIFORM = "uniform"
     EXPONENTIAL = "exponential"
-    BETA = "beta"
-    SINUSOIDAL = "sinusoidal"
+    BETA_SINUSOIDAL = "beta"
+    UNIFORM_SINUSOIDAL = "sinusoidal"
     PIECEWISE_BETA = "piecewise_beta"
     SIMPLE_TV = "simple_tv"
     PIECEWISE_TV = "piecewise_tv"
@@ -196,13 +196,13 @@ class MultiDistributionRunner:
         for dist in distributions:
             if dist == Distribution.UNIFORM:
                 distribution_names.append("Uniform")
-            elif dist == Distribution.BETA:
+            elif dist == Distribution.BETA_SINUSOIDAL:
                 distribution_names.append("Beta")
             elif dist == Distribution.NORMAL:
                 distribution_names.append("Normal")
             elif dist == Distribution.EXPONENTIAL:
                 distribution_names.append("Exponential")
-            elif dist == Distribution.SINUSOIDAL:
+            elif dist == Distribution.UNIFORM_SINUSOIDAL:
                 distribution_names.append("Sinusoidal")
             elif dist == Distribution.PIECEWISE_BETA:
                 distribution_names.append("Piecewise Beta")

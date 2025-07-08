@@ -81,7 +81,7 @@ class ConstrainedUCBPricingAgent(Agent):
             np.sqrt(self.alpha * np.log(self.t) / self.N_pulls)
         c_lcbs = self.avg_c - \
             np.sqrt(self.alpha * np.log(self.t) / self.N_pulls)
-        c_lcbs = np.clip(c_lcbs, 0.0, 1.0)
+        c_lcbs = np.clip(c_lcbs, 0.0, 1.0) # TODO negative cost doesnt make sense, note on google doc
         f_ucbs[-1] = 0.0
         c_lcbs[-1] = 0.0
 
@@ -161,7 +161,8 @@ class ConstrainedCombinatorialUCBAgent(Agent):
                       A_ub=A_ub, b_ub=b_ub,
                       A_eq=A_eq, b_eq=b_eq,
                       bounds=bounds,
-                      method='highs')
+                      method='highs-ipm',
+                      options={"tol": 1e-9}) #to adjust instable LP's
         if not res.success:
             raise RuntimeError("LP failed: " + res.message)
 
@@ -193,7 +194,7 @@ class ConstrainedCombinatorialUCBAgent(Agent):
             c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
 
         marginals: List[np.ndarray] = self._solve_marginal_lp(
-            f_ucb, c_lcb, self.rho)
+            f_ucb, c_lcb, self.rho )
         choice: List[int] = [
             int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N)]
         self.current_choice = choice
@@ -491,63 +492,51 @@ class Exp3PAgent(Agent):
     """
     EXP3.P agent for adversarial bandits with high-probability regret bounds.
 
-    Implements the algorithm from Auer et al. (2002), "The Nonstochastic Multiarmed
-    Bandit Problem", with parameters chosen to guarantee
-    O(\sqrt{K T \ln(K/\delta)}) regret with probability 1-\delta.
+    Applies the Exp3.P algorithm with the following hyperparameter settings:
+      - η = log(K/δ) / (T * K)
+      - γ = 0.95 * log(K) / (T * K)
+      - β = K * log(K) / T
 
-    Hyperparameters:
-      - K: number of arms
-      - T: time horizon
-      - delta: failure probability (confidence parameter)
-
-    Theoretical parameter settings:
-      gamma = min\bigl(1, \sqrt{ K * ln(K/delta) / ( (e-1) * T ) }\bigr)
-      beta  = ln(K/delta) / K
-      eta   = gamma / K
+    Theorem:
+      The Exp3.P algorithm applied to an adversarial MAB problem with K arms and the above
+      parameters suffers a regret of:
+          R_T ≤ 5.15 * T * K * log(K/δ)
+      with probability at least 1 − δ.
 
     On each round t:
       1. Compute sampling distribution p_t:
-           p_{i,t} = (1-gamma)*exp(eta * G_i) / sum_j exp(eta * G_j) + gamma/K
-      2. Draw I_t ~ p_t and observe reward g in [0,1]
-      3. Form importance-weighted reward + bias:
-           x_hat = (g + beta) / p_{I_t,t}
-           B     = beta / p_t  # vector of length K
+           p_{i,t} = (1-γ)*exp(η * G_i) / Σ_j exp(η * G_j) + γ/K
+      2. Draw I_t ∼ p_t and observe reward g ∈ [0,1]
+      3. Form importance-weighted reward plus bias:
+           x̂ = (g + β) / p_{I_t,t}
+           Define B as the vector with B_i = β / p_{i,t} for all arms.
       4. Update cumulative pseudo-rewards:
-           G_{I_t} += x_hat
-           G       += B
+           G_{I_t} ← G_{I_t} + x̂
+           For each i ≠ I_t, update G_i ← G_i + B_i
 
     References:
-      - Auer, Nicoló, Peter Auer, Nicoló Cesa-Bianchi, Yoav Freund, Robert E.
-        Schapire. "The Nonstochastic Multiarmed Bandit Problem." SIAM Journal on
-        Computing, 2002.
+      - https://trovo.faculty.polimi.it/02source/olam_2022/2022_05_11_Lez_4_MAB.pdf
     """
 
     def __init__(self, K: int, T: int, delta: float = 0.1):
         self.K = K
         self.T = T
         self.delta = delta
-        self.gamma = min(
-            1.0,
-            math.sqrt((K * math.log(K / delta)) / ((math.e - 1) * T))
-        )
-        self.beta = math.log(K / delta) / K
-        self.eta = self.gamma / K
+        self.eta = math.log(K / delta) / (T * K)
+        self.gamma = 0.95 * math.log(K) / (T * K)
+        self.beta = K * math.log(K) / T
         self.G = np.zeros(K)
         self.probs = np.ones(K) / K
 
     def _compute_probs(self) -> np.ndarray:
-        # subtract max for numerical stability
-        scaled_G = self.eta * self.G
+        scaled_G = self.eta * self.G  # scaled cumulative rewards
         max_scaled = np.max(scaled_G)
-        expG = np.exp(scaled_G - max_scaled)
+        expG = np.exp(scaled_G - max_scaled)  # numerical stability
         base = (1 - self.gamma) * (expG / expG.sum())
-        # add exploration component
         probs = base + self.gamma / self.K
-        # normalize and clip tiny values
         probs = probs / probs.sum()
         probs = np.clip(probs, 1e-12, 1.0)
-        # re-normalize in case of clipping
-        return probs / probs.sum()
+        return probs / probs.sum()  # re-normalize after clipping
 
     def pull_arm(self) -> int:
         self.probs = self._compute_probs()
@@ -556,13 +545,14 @@ class Exp3PAgent(Agent):
 
     def update(self, chosen: int, reward: float) -> None:
         p_chosen = self.probs[chosen]
-        # safeguard p_chosen in case of extreme values
         if p_chosen < 1e-12:
-            p_chosen = 1e-12
-        x_hat = (reward + self.beta) / p_chosen
-        bias_vec = self.beta / self.probs
-        self.G[chosen] += x_hat
-        self.G += bias_vec
+            p_chosen = 1e-12  # safeguard against extreme values
+        # update the chosen arm with (reward + β) / p_chosen
+        self.G[chosen] += (reward + self.beta) / p_chosen
+        # update every other arm with β / p_i
+        for i in range(self.K):
+            if i != chosen:
+                self.G[i] += self.beta / self.probs[i]
 
 
 class MultiProductPDExp3PricingAgent(Agent):

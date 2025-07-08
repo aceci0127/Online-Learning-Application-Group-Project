@@ -50,6 +50,9 @@ def compute_clairvoyant_single_product(prices, sell_probabilities, budget, horiz
     gamma = res.x
     expected_utility = -res.fun
     expected_cost = np.sum(sell_probabilities * gamma)
+    print(f"Expected utility: {expected_utility:.4f}")
+    print(f"Optimal distribution (gamma): {gamma}")
+    print(f"Expected cost: {expected_cost:.4f}")
 
     return expected_utility, gamma, expected_cost
 
@@ -309,7 +312,7 @@ def print_final_results(avg_regret, avg_units, min_rounds, final_rewards, agent=
 def create_default_prices() -> NDArray[np.float64]:
     """Crea array di prezzi di default per gli esperimenti"""
     return np.array([0.2, 0.256, 0.311, 0.367, 0.422, 0.478,
-                     0.533, 0.589, 0.644, 0.7, 0.756, 0.811,
+                     0.553, 0.589, 0.644, 0.7, 0.756, 0.811,
                      0.867, 0.922, 0.98, 1.001])
 
 

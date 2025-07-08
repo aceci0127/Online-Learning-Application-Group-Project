@@ -33,7 +33,7 @@ class PricingEnvironment(Environment):
         if rng is None:
             rng = np.random.default_rng()
         self._rng: np.random.Generator = rng
-        if distribution == Distribution.BETA:
+        if distribution == Distribution.BETA_SINUSOIDAL:
             self.valuations: np.ndarray = self._rng.beta(0.5, 2, size=T)
         elif distribution == Distribution.UNIFORM:
             self.valuations = self._rng.uniform(0, 1, size=T)
@@ -59,7 +59,7 @@ class BudgetedPricingEnvironment(Environment):
         if rng is None:
             rng = np.random.default_rng()
         self._rng: np.random.Generator = rng
-        if distribution == Distribution.BETA:
+        if distribution == Distribution.BETA_SINUSOIDAL:
             self.vals: np.ndarray = self._rng.beta(0.5, 2, size=T)
         elif distribution == Distribution.UNIFORM:
             self.vals = self._rng.uniform(0, 1, size=T)
@@ -80,16 +80,16 @@ class NonStationaryBudgetedPricingEnvironment(Environment):
 
     def __init__(self, prices: Union[List[float], np.ndarray], T: int, shock_prob: float,
                  freq: int, num_regimes: int = 10000,
-                 distribution: Distribution = Distribution.BETA, rng: Optional[np.random.Generator] = None) -> None:
+                 distribution: Distribution = Distribution.BETA_SINUSOIDAL, rng: Optional[np.random.Generator] = None) -> None:
         self.prices: np.ndarray = np.array(prices)
         self.T: int = T
         self.t: int = 0
         self.freq: int = freq
         self.rng: np.random.Generator = rng or np.random.default_rng()
-        if distribution == Distribution.BETA:
+        if distribution == Distribution.BETA_SINUSOIDAL:
             self.valuations: np.ndarray = generate_beta_valuations(
                 T, freq, rng=self.rng)
-        elif distribution == Distribution.SINUSOIDAL:
+        elif distribution == Distribution.UNIFORM_SINUSOIDAL:
             self.valuations = generate_sinusoidal_valuations(
                 T, freq, rng=self.rng, shock_prob=shock_prob)
         elif distribution == Distribution.PIECEWISE_BETA:
@@ -134,7 +134,7 @@ class MultiProductPricingEnvironment(Environment):
 
         if distribution == Distribution.UNIFORM:
             self.vals = self.rng.uniform(0, 1, size=(T, self.N))
-        elif distribution == Distribution.BETA:
+        elif distribution == Distribution.BETA_SINUSOIDAL:
             self.vals = self.rng.beta(0.5, 2, size=(T, self.N))
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
@@ -214,7 +214,7 @@ class SmoothMultiProductPricingEnvironment:
         if distribution == Distribution.SMOOTH:
             self.expected_means, self.valuations = generate_smooth_valuation_data(
                 T, K=self.num_windows, M=self.n_products,
-                max_jump=0.02, transition_frac=0.2, concentration=10, rng=self.rng
+                concentration=10, rng=self.rng
             )
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
