@@ -2,6 +2,7 @@ from typing import List, Optional, Tuple
 from abc import ABC, abstractmethod
 from scipy.optimize import linprog
 from collections import deque
+import itertools
 import math as math
 from typing import List, Tuple, Optional, Union
 import numpy as np
@@ -68,6 +69,7 @@ class ConstrainedUCBPricingAgent(Agent):
         self.rho: float = B / T
         self.t: int = 0
         self.adaptive_rho: bool = adaptive_rho
+
     def pull_arm(self) -> Optional[int]:
         if self.rem_budget < 1:
             self.a_t = None
@@ -81,7 +83,8 @@ class ConstrainedUCBPricingAgent(Agent):
             np.sqrt(self.alpha * np.log(self.t) / self.N_pulls)
         c_lcbs = self.avg_c - \
             np.sqrt(self.alpha * np.log(self.t) / self.N_pulls)
-        c_lcbs = np.clip(c_lcbs, 0.0, 1.0) # TODO negative cost doesnt make sense, note on google doc
+        # TODO negative cost doesnt make sense, note on google doc
+        c_lcbs = np.clip(c_lcbs, 0.0, 1.0)
         f_ucbs[-1] = 0.0
         c_lcbs[-1] = 0.0
 
@@ -92,7 +95,7 @@ class ConstrainedUCBPricingAgent(Agent):
     def compute_opt(self, f_ucbs: np.ndarray, c_lcbs: np.ndarray) -> np.ndarray:
         c = -f_ucbs
         A_ub = [c_lcbs]
-        if self.adaptive_rho:
+        if not self.adaptive_rho:
             b_ub = [self.rho]
         else:
             b_ub = [self.rem_budget / (self.T - self.t + 1)]
@@ -141,6 +144,7 @@ class ConstrainedCombinatorialUCBAgent(Agent):
         self.current_choice: List[int] = []
 
     def _solve_marginal_lp(self, f_ucb: List[np.ndarray], c_lcb: List[np.ndarray], rho: float) -> List[np.ndarray]:
+        print(f"f_ucb: {f_ucb}, c_lcb: {c_lcb}, rho: {rho}")
         f_flat: np.ndarray = np.concatenate(f_ucb)
         c_flat: np.ndarray = np.concatenate(c_lcb)
         num_vars: int = len(f_flat)
@@ -161,8 +165,7 @@ class ConstrainedCombinatorialUCBAgent(Agent):
                       A_ub=A_ub, b_ub=b_ub,
                       A_eq=A_eq, b_eq=b_eq,
                       bounds=bounds,
-                      method='highs-ipm',
-                      options={"tol": 1e-9}) #to adjust instable LP's
+                      method='highs')
         if not res.success:
             raise RuntimeError("LP failed: " + res.message)
 
@@ -173,6 +176,57 @@ class ConstrainedCombinatorialUCBAgent(Agent):
             marginals.append(x_flat[offset:offset + K])
             offset += K
         return marginals
+    '''
+
+    def _solve_marginal_lp(self, f_ucb: List[np.ndarray], c_lcb: List[np.ndarray], rho: float) -> np.ndarray:
+        """
+        Solves an LP over the full set of superarms.
+        Each superarm is a tuple (k1, k2, ..., kN) with one index for each product.
+
+        The LP is:
+        maximize   sum_i f_super[i] * y_i    (or minimize - sum_i f_super[i] * y_i)
+        s.t.       sum_i c_super[i] * y_i <= rho,
+                    sum_i y_i = 1,
+                    y_i >= 0   for all i.
+
+        Returns:
+            y: 1D numpy array giving the optimal probability over superarms.
+        """
+        N = len(f_ucb)
+        # Build the list of all possible combinations: one index per product
+        superarm_indices = list(itertools.product(
+            *[range(len(f_ucb[j])) for j in range(N)]))
+        num_superarms = len(superarm_indices)
+
+        # Compute total revenue and cost for each superarm
+        f_super = np.empty(num_superarms)
+        c_super = np.empty(num_superarms)
+        for i, indices in enumerate(superarm_indices):
+            # revenue is sum of f_ucb values and cost is sum of c_lcb values for that combination
+            f_super[i] = sum(f_ucb[j][indices[j]] for j in range(N))
+            c_super[i] = sum(c_lcb[j][indices[j]] for j in range(N))
+
+        # Define the LP:
+        # Objective: minimize -f_super^T y
+        c_obj = -f_super
+        # Equality constraint: sum_i y_i = 1
+        A_eq = np.ones((1, num_superarms))
+        b_eq = np.array([1])
+        # Inequality constraint: sum_i c_super[i] * y_i <= rho
+        A_ub = c_super.reshape(1, -1)
+        b_ub = np.array([rho])
+        # y_i >= 0. The upper bound can be left at 1.
+        bounds = [(0, 1)] * num_superarms
+
+        res = linprog(c=c_obj, A_ub=A_ub, b_ub=b_ub,
+                      A_eq=A_eq, b_eq=b_eq, bounds=bounds,
+                      method='highs-ds', options={"tol": 1e-6})
+        if not res.success and not (res.status == 15 and res.primal_status == 0):
+            raise RuntimeError(f"LP failed: {res.message}")
+
+        # res.x is the probability distribution over superarms.
+        return res.x
+    '''
 
     def pull_arm(self) -> Optional[List[int]]:
         if self.B_rem < 1 or self.t >= self.T:
@@ -194,11 +248,44 @@ class ConstrainedCombinatorialUCBAgent(Agent):
             c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
 
         marginals: List[np.ndarray] = self._solve_marginal_lp(
-            f_ucb, c_lcb, self.rho )
+            f_ucb, c_lcb, self.rho)
         choice: List[int] = [
             int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N)]
         self.current_choice = choice
         return choice
+    '''
+
+    def pull_arm(self) -> Optional[List[int]]:
+        if self.B_rem < 1 or self.t >= self.T:
+            return None
+
+        f_ucb: List[np.ndarray] = []
+        c_lcb: List[np.ndarray] = []
+        for j in range(self.N):
+            n_j = self.N_pulls[j]
+            f_j = self.avg_f[j]
+            c_j = self.avg_c[j]
+            # Compute bonus; when not pulled, set bonus high so that option is forced to be selected
+            bonus = np.sqrt(
+                self.alpha * np.log(max(self.t, 1)) / np.maximum(1, n_j))
+            bonus[n_j == 0] = self.T
+            # Last price option (often a dummy) has no bonus
+            bonus[-1] = 0.0
+            f_ucb.append(f_j + bonus)
+            c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
+
+        # Use the superarm LP to get a joint distribution over all products.
+        y = self._solve_marginal_lp(f_ucb, c_lcb, self.rho)
+
+        # Reconstruct the list of all possible superarms.
+        superarm_indices = list(
+            itertools.product(*[range(k) for k in self.Ks]))
+        # Sample one superarm according to distribution y.
+        chosen_idx = self.rng.choice(len(y), p=y)
+        choice = list(superarm_indices[chosen_idx])
+        self.current_choice = choice
+        return choice
+    '''
 
     def update(self, rewards: np.ndarray, costs: np.ndarray) -> None:
         for j, idx in enumerate(self.current_choice):

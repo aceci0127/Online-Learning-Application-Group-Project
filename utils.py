@@ -1,3 +1,5 @@
+import itertools
+from typing import Tuple, List
 import numpy as np
 from scipy.optimize import linprog
 from scipy.stats import truncnorm
@@ -79,6 +81,68 @@ def compute_sell_probabilities_multi(V, prices):
     return s
 
 
+def solve_clairvoyant_lp_superarm(price_grid: List[np.ndarray], B: float, T: int, f_true: List[np.ndarray], c_true: List[np.ndarray]) -> Tuple[float, np.ndarray]:
+    """
+    Solves the clairvoyant per-round LP using the superarm formulation.
+
+    Args:
+        price_grid: list of 1D numpy arrays, one for each product, containing the available prices.
+        B: total inventory budget.
+        T: total number of rounds.
+        f_true: list of 1D numpy arrays; each f_true[j] gives the true expected revenue (e.g. price*sell probability) for product j.
+        c_true: list of 1D numpy arrays; each c_true[j] gives the true expected consumption (e.g. sell probability) for product j.
+
+    Returns:
+        optimal_per_round: the optimal expected revenue per round.
+        simplex: 1D numpy array with the optimal probability distribution over superarms.
+    """
+    # Compute per-round budget (pacing constraint)
+    rho = B / T
+
+    N = len(price_grid)  # number of products
+    # Create list of all possible superarm indices
+    superarm_indices = list(itertools.product(
+        *[range(len(price_grid[j])) for j in range(N)]))
+    num_superarms = len(superarm_indices)
+
+    # Compute total expected revenue and total cost for each superarm
+    f_super = np.empty(num_superarms)
+    c_super = np.empty(num_superarms)
+    for i, indices in enumerate(superarm_indices):
+        # f_super[i] is the sum over products of f_true[j][index_j]
+        f_super[i] = sum(f_true[j][indices[j]] for j in range(N))
+        # c_super[i] is the sum over products of c_true[j][indices[j]]
+        c_super[i] = sum(c_true[j][indices[j]] for j in range(N))
+
+    # Define LP: maximize sum(f_super * y) subject to sum(y) = 1 and sum(c_super * y) <= rho
+    # We express this as: minimize c_obj = -f_super^T y
+    c_obj = -f_super
+    # Equality constraint: sum_i y_i = 1
+    A_eq = np.ones((1, num_superarms))
+    b_eq = np.array([1])
+    # Inequality constraint: sum_i c_super[i] * y[i] <= rho
+    A_ub = c_super.reshape(1, -1)
+    b_ub = np.array([rho])
+    # Bounds: y[i] >= 0 (upper bound can be left at 1)
+    bounds = [(0, 1)] * num_superarms
+
+    res = linprog(c=c_obj, A_ub=A_ub, b_ub=b_ub,
+                  A_eq=A_eq, b_eq=b_eq, bounds=bounds,
+                  method='highs')
+    if not res.success:
+        raise ValueError(
+            "Superarm LP did not solve successfully: " + res.message)
+
+    # The optimal expected revenue per round is -res.fun
+    optimal_per_round = -res.fun
+    simplex = res.x
+    print(f"Superarm LP Expected cost: {np.sum(c_super * res.x):.4f}")
+    print(
+        f"Superarm LP Optimal expected revenue per round: {optimal_per_round:.4f}")
+    print(f"Superarm LP Optimal distribution (simplex): {simplex}")
+    return optimal_per_round, simplex
+
+
 def solve_clairvoyant_lp(price_grid, B, T, f_true, c_true):
     """
     Solves the clairvoyant per-round LP for given price grids, budget, and horizon.
@@ -124,6 +188,8 @@ def solve_clairvoyant_lp(price_grid, B, T, f_true, c_true):
                   method='highs')
     expected_cost = np.sum(c_flat * res.x)
     print(f"Expected cost: {expected_cost:.4f}")
+    print(f"Optimal expected revenue per round: {-res.fun:.4f}")
+    print(f"Optimal distribution (simplex): {res.x}")
     if res.success:
         optimal_per_round = -res.fun
         simplex = res.x

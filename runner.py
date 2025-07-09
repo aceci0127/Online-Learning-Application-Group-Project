@@ -9,7 +9,7 @@ class Distribution(Enum):
     NORMAL = "normal"
     UNIFORM = "uniform"
     EXPONENTIAL = "exponential"
-    BETA_SINUSOIDAL = "beta"
+    BETA = "beta"
     UNIFORM_SINUSOIDAL = "sinusoidal"
     PIECEWISE_BETA = "piecewise_beta"
     SIMPLE_TV = "simple_tv"
@@ -105,13 +105,20 @@ class StandardExperimentRunner:
         cum_units = 0.0
 
         clairvoyant_reward = self.compute_clairvoyant_reward()
-
+        flag = False
         for t in range(self.config.horizon):
             action = self.agent.pull_arm()
-
             if action is None:
-                print(f"Trial {trial+1}: Agent stopped at round {t}.", end=" ")
-                break
+                if not flag:
+                    print(
+                        f"Trial {trial+1}: Agent stopped at round {t}.", end=" ")
+                    flag = True
+                # Ensure action is a list in multi-product cases
+                if self.config.n_products > 1:
+                    action = [len(self.config.prices[0]) - 1] * \
+                        self.config.n_products
+                else:
+                    action = len(self.config.prices) - 1
 
             env_result = self.env.round(action)
 
@@ -196,7 +203,7 @@ class MultiDistributionRunner:
         for dist in distributions:
             if dist == Distribution.UNIFORM:
                 distribution_names.append("Uniform")
-            elif dist == Distribution.BETA_SINUSOIDAL:
+            elif dist == Distribution.BETA:
                 distribution_names.append("Beta")
             elif dist == Distribution.NORMAL:
                 distribution_names.append("Normal")
