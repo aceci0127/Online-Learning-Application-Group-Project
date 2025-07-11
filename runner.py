@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Any, Union
@@ -115,10 +116,10 @@ class StandardExperimentRunner:
                     flag = True
                 # Ensure action is a list in multi-product cases
                 if self.config.n_products > 1:
-                    action = [len(self.config.prices[0]) - 1] * \
+                    action = [len(self.env.price_grid[0]) - 1] * \
                         self.config.n_products
                 else:
-                    action = len(self.config.prices) - 1
+                    action = len(self.env.price_grid) - 1
 
             env_result = self.env.round(action)
 
@@ -192,7 +193,6 @@ class MultiDistributionRunner:
 
     def run_experiment(self):
         """Run experiments for all distributions"""
-        # Check if distribution is a list
         if isinstance(self.config.distribution, list):
             distributions = self.config.distribution
         else:
@@ -253,7 +253,6 @@ class MultiDistributionRunner:
 
     def plot_comparison(self, show_units: bool = False, show_budget: bool = True):
         """Plot comparison of all distributions using the same style as StandardPlotter"""
-        import matplotlib.pyplot as plt
 
         if not self.results:
             print("Nessun risultato da plottare. Esegui prima run_experiment().")

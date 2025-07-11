@@ -71,7 +71,7 @@ class ConstrainedUCBPricingAgent(Agent):
         self.adaptive_rho: bool = adaptive_rho
 
     def pull_arm(self) -> Optional[int]:
-        if self.rem_budget < 1:
+        if self.rem_budget <= 0:  # Cambiato da < 1 a <= 0
             self.a_t = None
             return None
 
@@ -85,8 +85,8 @@ class ConstrainedUCBPricingAgent(Agent):
             np.sqrt(self.alpha * np.log(self.t) / self.N_pulls)
         # TODO negative cost doesnt make sense, note on google doc
         c_lcbs = np.clip(c_lcbs, 0.0, 1.0)
-        f_ucbs[-1] = 0.0
-        c_lcbs[-1] = 0.0
+        # RIMOSSO: f_ucbs[-1] = 0.0 e c_lcbs[-1] = 0.0
+        # Non c'è motivo economico per azzerare l'ultimo braccio
 
         gamma_t = self.compute_opt(f_ucbs, c_lcbs)
         self.a_t = int(self.rng.choice(self.K, p=gamma_t))
@@ -127,7 +127,7 @@ class ConstrainedUCBPricingAgent(Agent):
 class ConstrainedCombinatorialUCBAgent(Agent):
     """Constrained Combinatorial UCB agent for multi-product"""
 
-    def __init__(self, price_grid: List[np.ndarray], B: float, T: int, alpha: float = 2) -> None:
+    def __init__(self, price_grid: List[np.ndarray], B: float, T: int, alpha: float = 2, adaptive_rho: bool = False) -> None:
         self.price_grid: List[np.ndarray] = price_grid
         self.N: int = len(price_grid)
         self.Ks: List[int] = [len(pg) for pg in price_grid]
@@ -142,9 +142,9 @@ class ConstrainedCombinatorialUCBAgent(Agent):
         self.avg_f: List[np.ndarray] = [np.zeros(K) for K in self.Ks]
         self.avg_c: List[np.ndarray] = [np.zeros(K) for K in self.Ks]
         self.current_choice: List[int] = []
+        self.adaptive_rho: bool = adaptive_rho
 
-    def _solve_marginal_lp(self, f_ucb: List[np.ndarray], c_lcb: List[np.ndarray], rho: float) -> List[np.ndarray]:
-        print(f"f_ucb: {f_ucb}, c_lcb: {c_lcb}, rho: {rho}")
+    def _solve_marginal_lp(self, f_ucb: List[np.ndarray], c_lcb: List[np.ndarray]) -> List[np.ndarray]:
         f_flat: np.ndarray = np.concatenate(f_ucb)
         c_flat: np.ndarray = np.concatenate(c_lcb)
         num_vars: int = len(f_flat)
@@ -158,7 +158,10 @@ class ConstrainedCombinatorialUCBAgent(Agent):
             offset += K
 
         A_ub = c_flat.reshape(1, -1)
-        b_ub = np.array([rho])
+        if not self.adaptive_rho:
+            b_ub = np.array([self.rho])
+        else:
+            b_ub = np.array([self.B_rem / (self.T - self.t + 1)])
         bounds = [(0, 1)] * num_vars
 
         res = linprog(c=c_obj,
@@ -248,13 +251,12 @@ class ConstrainedCombinatorialUCBAgent(Agent):
             c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
 
         marginals: List[np.ndarray] = self._solve_marginal_lp(
-            f_ucb, c_lcb, self.rho)
+            f_ucb, c_lcb)
         choice: List[int] = [
             int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N)]
         self.current_choice = choice
         return choice
     '''
-
     def pull_arm(self) -> Optional[List[int]]:
         if self.B_rem < 1 or self.t >= self.T:
             return None
@@ -560,7 +562,7 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
             f_ucb.append(f_j + bonus)
             c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
         marginals: List[np.ndarray] = self._solve_marginal_lp(
-            f_ucb, c_lcb, self.rho)
+            f_ucb, c_lcb)
         choice: List[int] = [
             int(self.rng.choice(self.Ks[j], p=marginals[j])) for j in range(self.N)]
         self.current_choice = choice

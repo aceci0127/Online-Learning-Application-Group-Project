@@ -60,7 +60,7 @@ class BudgetedPricingEnvironment(Environment):
             rng = np.random.default_rng()
         self._rng: np.random.Generator = rng
         if distribution == Distribution.BETA:
-            self.vals: np.ndarray = self._rng.beta(0.5, 2, size=T)
+            self.vals: np.ndarray = self._rng.beta(2, 5, size=T)
         elif distribution == Distribution.UNIFORM:
             self.vals = self._rng.uniform(0, 1, size=T)
         else:
@@ -136,7 +136,7 @@ class MultiProductPricingEnvironment(Environment):
             self.vals = self.rng.uniform(0, 1, size=(T, self.N))
         elif distribution == Distribution.BETA:
             # self.vals = self.rng.beta(0.5, 2, size=(T, self.N))
-            self.vals = self.rng.beta(2, 2, size=(T, self.N))
+            self.vals = self.rng.beta(5, 10, size=(T, self.N))
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 
