@@ -81,7 +81,7 @@ class NonStationaryBudgetedPricingEnvironment(Environment):
     def __init__(self, prices: Union[List[float], np.ndarray], T: int, shock_prob: float,
                  freq: int, num_regimes: int = 10000,
                  distribution: Distribution = Distribution.BETA, rng: Optional[np.random.Generator] = None) -> None:
-        self.prices: np.ndarray = np.array(prices)
+        self.price_grid: np.ndarray = np.array(prices)
         self.T: int = T
         self.t: int = 0
         self.freq: int = freq
@@ -100,7 +100,7 @@ class NonStationaryBudgetedPricingEnvironment(Environment):
 
     def bandit_round(self, price_index: int) -> Tuple[float, float]:
         """Round with bandit feedback (only reward for the chosen arm)"""
-        p: float = self.prices[price_index]
+        p: float = self.price_grid[price_index]
         sale: bool = self.valuations[self.t] >= p
         reward: float = p if sale else 0.0
         cost: float = 1.0 if sale else 0.0
@@ -116,7 +116,7 @@ class NonStationaryBudgetedPricingEnvironment(Environment):
     def compute_sell_probabilities(self) -> np.ndarray:
         """Compute sell probabilities for each price"""
         sell_probabilities: np.ndarray = np.array([
-            float(np.sum(p <= self.valuations)) / self.T for p in self.prices
+            float(np.sum(p <= self.valuations)) / self.T for p in self.price_grid
         ])
         return sell_probabilities
 
