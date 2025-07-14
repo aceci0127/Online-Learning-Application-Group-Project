@@ -2,7 +2,6 @@ from typing import List, Optional, Tuple
 from abc import ABC, abstractmethod
 from scipy.optimize import linprog
 from collections import deque
-import itertools
 import math as math
 from typing import List, Tuple, Optional, Union
 import numpy as np
@@ -22,7 +21,7 @@ class Agent(ABC):
         pass
 
 
-class UCB1PricingAgent(Agent):
+class UCB1(Agent):
     """UCB1 agent for simple pricing"""
 
     def __init__(self, K: int, T: int, range: float = 1) -> None:
@@ -52,7 +51,7 @@ class UCB1PricingAgent(Agent):
         self.t += 1
 
 
-class ConstrainedUCBPricingAgent(Agent):
+class UCBBudget(Agent):
     """Constrained UCB agent for pricing with budget"""
 
     def __init__(self, K: int, B: float, T: int, alpha: float = 2, adaptive_rho: bool = False) -> None:
@@ -65,13 +64,13 @@ class ConstrainedUCBPricingAgent(Agent):
         self.N_pulls: np.ndarray = np.zeros(K)
         self.rng = np.random.default_rng()
         self.rem_budget: float = B
-        self.budget: float = B
+        self.B: float = B
         self.rho: float = B / T
         self.t: int = 0
         self.adaptive_rho: bool = adaptive_rho
 
     def pull_arm(self) -> Optional[int]:
-        if self.rem_budget <= 0:  # Cambiato da < 1 a <= 0
+        if self.rem_budget <= 0:
             self.a_t = None
             return None
 
@@ -85,8 +84,8 @@ class ConstrainedUCBPricingAgent(Agent):
             np.sqrt(self.alpha * np.log(self.t) / self.N_pulls)
         # TODO negative cost doesnt make sense, note on google doc
         c_lcbs = np.clip(c_lcbs, 0.0, 1.0)
-        # RIMOSSO: f_ucbs[-1] = 0.0 e c_lcbs[-1] = 0.0
-        # Non c'è motivo economico per azzerare l'ultimo braccio
+        f_ucbs[-1] = 0.0
+        c_lcbs[-1] = 0.0
 
         gamma_t = self.compute_opt(f_ucbs, c_lcbs)
         self.a_t = int(self.rng.choice(self.K, p=gamma_t))
@@ -328,7 +327,7 @@ class FFPrimalDualPricingAgent(Agent):
         self.prices: np.ndarray = np.array(prices)
         self.K: int = len(prices)
         self.T: int = T
-        self.inventory: float = B
+        self.B: float = B
         self.eta: float = eta
         self.rng = np.random.default_rng()
         self.hedge: HedgeAgent = HedgeAgent(
@@ -343,7 +342,7 @@ class FFPrimalDualPricingAgent(Agent):
         self.hedge_weight_history: List[np.ndarray] = []
 
     def pull_arm(self) -> Optional[int]:
-        if self.inventory < 1:
+        if self.B < 1:
             self.last_arm = None
             return self.last_arm
         self.last_arm = self.hedge.pull_arm()
@@ -366,7 +365,7 @@ class FFPrimalDualPricingAgent(Agent):
         if self.last_arm is not None:
             c_t: int = 1 if self.prices[self.last_arm] <= v_t else 0
             f_t: float = self.prices[self.last_arm] * c_t
-            self.inventory -= c_t
+            self.B -= c_t
             self.pull_counts[self.last_arm] += 1
         else:
             c_t = 0
@@ -389,11 +388,11 @@ class BanditFeedbackPrimalDual(Agent):
         self.prices: np.ndarray = np.array(prices)
         self.K: int = len(prices)
         self.T: int = T
-        self.inventory: float = B
+        self.B: float = B
         self.eta: float = 1 / np.sqrt(T)
         self.rng = np.random.default_rng()
         # Use EXP3.P as the primal (hedge) agent with a given delta
-        self.hedge: Exp3PAgent = Exp3PAgent(K=self.K, T=self.T, delta=0.05)
+        self.exp3p: Exp3PAgent = Exp3PAgent(K=self.K, T=self.T, delta=0.05)
         self.rho: float = B / T
         self.lmbd: float = 1.0
         self.t: int = 0
@@ -401,45 +400,42 @@ class BanditFeedbackPrimalDual(Agent):
         self.last_arm: Optional[int] = None
         # Histories for plotting
         self.lmbd_history: List[float] = []
-        self.hedge_weight_history: List[np.ndarray] = []
+        self.exp3p_weight_history: List[np.ndarray] = []
 
     def pull_arm(self) -> Optional[int]:
-        if self.inventory < 1:
+        if self.B < 1:
             self.last_arm = None
             return self.last_arm
-        self.last_arm = self.hedge.pull_arm()
+        self.last_arm = self.exp3p.pull_arm()
         return self.last_arm
 
     def update(self, v_t: float) -> Tuple[float, float]:
         if self.last_arm is None:
             return 0.0, 0.0
 
-        # Determine whether a sale occurs at the chosen price
         price_chosen = self.prices[self.last_arm]
-        sale = 1 if price_chosen <= v_t else 0
+        c_t = 1 if price_chosen <= v_t else 0
 
-        # Revenue is the price if a sale occurs, cost is simply the sale indicator
-        f_t = price_chosen * sale
-        c_t = sale
-
-        # Update inventory and record count for the chosen arm
-        self.inventory -= c_t
+        f_t = price_chosen * c_t
+        self.B -= c_t
         self.pull_counts[self.last_arm] += 1
 
-        # Compute net reward with a dual penalty term
-        penalty = self.lmbd * (sale - self.rho)
-        net = f_t - penalty
+        net = f_t - self.lmbd * (c_t - self.rho)
+
+        # Normalize
         p_max = self.prices.max()
-        # Normalize the net reward to be in [0,1] for bandit feedback purposes
-        net_norm = (net + p_max) / (2 * p_max)
+        L_up = p_max - self.lmbd * (0 - self.rho)
+        L_low = 0.0 - self.lmbd * (1 - self.rho)
+        norm_factor = L_up - L_low + 1e-12
+        net_norm = (net - L_low) / norm_factor
 
-        # Update the EXP3.P (hedge) sub-agent using the bandit reward feedback for the chosen arm
-        self.hedge.probs = self.hedge._compute_probs()
-        self.hedge.update(self.last_arm, net_norm)
+        # Update the EXP3.P sub-agent using the bandit reward feedback for the chosen arm
+        self.exp3p.probs = self.exp3p._compute_probs()
+        self.exp3p.update(self.last_arm, net_norm)
 
-        # Update the dual variable lambda based on the observed cost vs. the per-round budget (rho)
-        self.lmbd = np.clip(self.lmbd - self.eta * (self.rho - c_t),
-                            a_min=0.0, a_max=1.0 / self.rho)
+        # Update the dual variable lambda
+        self.lmbd = np.clip(self.lmbd - self.eta *
+                            (self.rho - c_t), a_min=0.0, a_max=1.0 / self.rho)
         self.lmbd_history.append(self.lmbd)
 
         self.t += 1
@@ -464,9 +460,7 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
             for _ in range(n_products)
         ]
         self.lmbd: float = 1.0
-        # Record lambda history as before
         self.lmbd_history: List[float] = []
-        # New: record hedge probabilities for each product over time
         self.hedge_prob_history: List[List[np.ndarray]] = [
             [] for _ in range(n_products)]
 
@@ -506,10 +500,8 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
             loss_vec[-1] = 1.0
             losses.append(loss_vec)
 
-        # Update each product-specific hedge and record its normalized probabilities
         for j in range(self.n_products):
             self.hedges[j].update(losses[j])
-            # Record normalized probabilities for product j
             prob_j = self.hedges[j].weights / np.sum(self.hedges[j].weights)
             self.hedge_prob_history[j].append(prob_j.copy())
 
@@ -618,14 +610,10 @@ class Exp3PAgent(Agent):
         self.probs = np.ones(K) / K
 
     def _compute_probs(self) -> np.ndarray:
-        scaled_G = self.eta * self.G  # scaled cumulative rewards
-        max_scaled = np.max(scaled_G)
-        expG = np.exp(scaled_G - max_scaled)  # numerical stability
+        expG = np.exp(self.eta * self.G)
         base = (1 - self.gamma) * (expG / expG.sum())
         probs = base + self.gamma / self.K
-        probs = probs / probs.sum()
-        probs = np.clip(probs, 1e-12, 1.0)
-        return probs / probs.sum()  # re-normalize after clipping
+        return probs / probs.sum()
 
     def pull_arm(self) -> int:
         self.probs = self._compute_probs()
@@ -633,15 +621,11 @@ class Exp3PAgent(Agent):
         return choice
 
     def update(self, chosen: int, reward: float) -> None:
-        p_chosen = self.probs[chosen]
-        if p_chosen < 1e-12:
-            p_chosen = 1e-12  # safeguard against extreme values
-        # update the chosen arm with (reward + β) / p_chosen
-        self.G[chosen] += (reward + self.beta) / p_chosen
-        # update every other arm with β / p_i
         for i in range(self.K):
             if i != chosen:
                 self.G[i] += self.beta / self.probs[i]
+            else:
+                self.G[i] += (reward + self.beta) / self.probs[i]
 
 
 class MultiProductPDExp3PricingAgent(Agent):
@@ -665,8 +649,8 @@ class MultiProductPDExp3PricingAgent(Agent):
         self.last_choices: Optional[List[int]] = None
         # EXP3.P parameters
         self.delta = delta
-        self.sub_agents = [Exp3PAgent(self.K, T, delta)
-                           for _ in range(n_products)]
+        self.exp3p_agents = [Exp3PAgent(self.K, T, delta)
+                             for _ in range(n_products)]
         # Dual step size
         self.eta = eta if eta is not None else 1 / math.sqrt(n_products * T)
         self.lmbd = 1.0
@@ -675,28 +659,31 @@ class MultiProductPDExp3PricingAgent(Agent):
     def pull_arm(self) -> Optional[List[int]]:
         if self.B < 1:
             return None
-        self.last_choices = [agent.pull_arm() for agent in self.sub_agents]
+        self.last_choices = [agent.pull_arm() for agent in self.exp3p_agents]
         return self.last_choices
 
     def update(self, values: np.ndarray) -> Tuple[float, int]:
         total_revenue = 0.0
         total_sales = 0
         p_max = self.prices.max()
-        for j, agent in enumerate(self.sub_agents):
+        for j, agent in enumerate(self.exp3p_agents):
             if self.last_choices is None:
                 continue
             choice = self.last_choices[j]
             price = self.prices[choice]
             val = float(values[j])
-            sale = 1.0 if price <= val else 0.0
+            cost = 1.0 if price <= val else 0.0
 
-            reward = price * sale
+            reward = price * cost
             total_revenue += reward
-            total_sales += int(sale)
+            total_sales += cost
 
-            penalty = self.lmbd * (sale - self.rho)
-            net = reward - penalty
-            net_norm = (net + p_max) / (2 * p_max)
+            net = reward - self.lmbd * (cost - self.rho)
+
+            L_up = p_max - self.lmbd * (0 - self.rho)
+            L_low = 0.0 - self.lmbd * (1 - self.rho)
+            norm_factor = L_up - L_low + 1e-12
+            net_norm = (net - L_low) / norm_factor
 
             # update EXP3.P sub-agent based on the stored choice
             agent.probs = agent._compute_probs()

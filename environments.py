@@ -157,11 +157,12 @@ class MultiProductBudgetedPricingEnvironment(Environment):
     """Environment for multi-product pricing with budget and full feedback"""
 
     def __init__(self, T: int, n_products: int, valuation_params: dict,
-                 rng: np.random.Generator, distribution: Distribution = Distribution.SIMPLE_TV) -> None:
+                 rng: np.random.Generator, distribution: Distribution = Distribution.SIMPLE_TV, price_grid: List[np.ndarray] = None) -> None:
         self.T: int = T
         self.n_products: int = n_products
         self.t: int = 0
         self.rng: np.random.Generator = rng
+        self.price_grid: List[np.ndarray] = price_grid
         if distribution == Distribution.SIMPLE_TV:
             mu0: float = valuation_params['mu0']
             A: float = valuation_params['A']
