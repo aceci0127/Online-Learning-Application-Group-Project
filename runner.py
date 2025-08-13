@@ -16,7 +16,8 @@ class Distribution(Enum):
     SIMPLE_TV = "simple_tv"
     PIECEWISE_TV = "piecewise_tv"
     PIECEWISE_SINUSOIDAL = "piecewise_sinusoidal"
-    SMOOTH = "smooth"
+    SMOOTH_SIMILAR_STEP = "smooth_similar_step"
+    SMOOTH_INDEPENDENT_STEP = "smooth_independent_step"
 
 
 @dataclass
@@ -114,6 +115,7 @@ class StandardExperimentRunner:
                     print(
                         f"Trial {trial+1}: Agent stopped at round {t}.", end=" ")
                     flag = True
+
                 # Ensure action is a list in multi-product cases
                 if self.config.n_products > 1:
                     action = [len(self.env.price_grid[0]) - 1] * \
@@ -219,7 +221,7 @@ class MultiDistributionRunner:
                 distribution_names.append("Piecewise TV")
             elif dist == Distribution.PIECEWISE_SINUSOIDAL:
                 distribution_names.append("Piecewise Sinusoidal")
-            elif dist == Distribution.SMOOTH:
+            elif dist == Distribution.SMOOTH_SIMILAR_STEP:
                 distribution_names.append("Smooth")
             else:
                 distribution_names.append(str(dist))

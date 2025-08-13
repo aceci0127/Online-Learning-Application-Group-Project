@@ -8,7 +8,9 @@ from data_generators import (
     generate_piecewise_beta_valuations,
     generate_simple_tv_mv_gauss,
     generate_piecewise_tv_mv_gauss,
-    generate_smooth_valuation_data
+    generate_smooth_valuation_data,
+    generate_independent_valuation_data
+
 )
 from runner import Distribution
 
@@ -26,7 +28,7 @@ class PricingEnvironment(Environment):
     """Environment for simple pricing with uniform valuations"""
 
     def __init__(self, prices: Union[List[float], np.ndarray], T: int, rng: Optional[np.random.Generator] = None, distribution: Distribution = Distribution.UNIFORM) -> None:
-        self.prices: np.ndarray = np.array(prices)
+        self.price_grid: np.ndarray = np.array(prices)
         self.m: int = len(prices)
         self.T: int = T
         self.t: int = 0
@@ -45,7 +47,7 @@ class PricingEnvironment(Environment):
             raise ValueError(f"Unsupported distribution: {distribution}")
 
     def round(self, arm_index: int) -> float:
-        chosen_price: float = self.prices[arm_index]
+        chosen_price: float = self.price_grid[arm_index]
         v: float = float(self.valuations[self.t])
         revenue: float = chosen_price if v >= chosen_price else 0.0
         self.t += 1
@@ -57,7 +59,7 @@ class BudgetedPricingEnvironment(Environment):
 
     def __init__(self, prices: Union[List[float], np.ndarray], T: int, distribution: Distribution = Distribution.UNIFORM,
                  rng: Optional[np.random.Generator] = None) -> None:
-        self.prices: np.ndarray = np.array(prices)
+        self.price_grid: np.ndarray = np.array(prices)
         self.T: int = T
         self.t: int = 0
         if rng is None:
@@ -74,7 +76,7 @@ class BudgetedPricingEnvironment(Environment):
             raise ValueError(f"Unsupported distribution: {distribution}")
 
     def round(self, price_index: int) -> Tuple[float, float]:
-        p: float = self.prices[price_index]
+        p: float = self.price_grid[price_index]
         sale: bool = self.vals[self.t] >= p
         reward: float = p if sale else 0.0
         cost: float = 1.0 if sale else 0.0
@@ -145,9 +147,9 @@ class MultiProductPricingEnvironment(Environment):
             # self.vals = self.rng.beta(0.5, 2, size=(T, self.N))
             self.vals = self.rng.beta(5, 10, size=(T, self.N))
         elif distribution == Distribution.NORMAL:
-            # Generate normal distribution with mean=0.5 and std=0.15, truncated to [0,1]
+            # Generate normal distribution with mean=0.3 and std=0.1, truncated to [0,1]
             self.vals = np.clip(self.rng.normal(
-                0.5, 0.15, size=(T, self.N)), 0, 1)
+                0.3, 0.1, size=(T, self.N)), 0, 1)
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 
@@ -214,7 +216,7 @@ class MultiProductBudgetedPricingEnvironment(Environment):
 
 class SmoothMultiProductPricingEnvironment:
     def __init__(self, price_grid: List[np.ndarray], T: int, n_products: int, num_windows: int,
-                 rng: np.random.Generator, distribution: Distribution = Distribution.SMOOTH) -> None:
+                 rng: np.random.Generator, distribution: Distribution = Distribution.SMOOTH_SIMILAR_STEP) -> None:
         self.price_grid: List[np.ndarray] = price_grid
         self.N: int = len(price_grid)
         self.T: int = T
@@ -224,11 +226,16 @@ class SmoothMultiProductPricingEnvironment:
         self.num_windows: int = num_windows
         self.distribution: Distribution = distribution
 
-        if distribution == Distribution.SMOOTH:
+        if distribution == Distribution.SMOOTH_SIMILAR_STEP:
             self.expected_means, self.valuations = generate_smooth_valuation_data(
                 T, K=self.num_windows, M=self.n_products,
-                concentration=10, rng=self.rng
+                concentration=50, rng=self.rng
             )
+        elif distribution == Distribution.SMOOTH_INDEPENDENT_STEP:
+            self.expected_means, self.valuations = generate_independent_valuation_data(
+                T, M=self.n_products, concentration=50, rng=self.rng
+            )
+
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 

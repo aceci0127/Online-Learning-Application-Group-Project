@@ -1,3 +1,4 @@
+from scipy.stats import truncnorm
 import numpy as np
 from scipy.stats import beta, truncnorm
 from collections import deque
@@ -108,18 +109,17 @@ def generate_piecewise_tv_mv_gauss(T: int, m: int, num_regimes: int,
     return V, R_ts
 
 
-
 def generate_smooth_valuation_data(T: int, K: int, M: int = 1, concentration: float = 50,
-                                  rng: Optional[np.random.Generator] = None) -> Tuple[np.ndarray, np.ndarray]:
+                                   rng: Optional[np.random.Generator] = None) -> Tuple[np.ndarray, np.ndarray]:
     """
     Generate smooth valuation data where the distribution in each window is constant,
     but windows are connected by a random walk to produce slowly changing distributions.
-    
+
     T: total number of time steps.
     K: number of windows.
     M: number of products.
     concentration: concentration parameter for the Beta distribution.
-    
+
     Each window uses its target mean, which is created as a slight step from the previous one.
     A higher concentration leads to a distribution that is more peaked around the mean (lower variance), 
     while a lower concentration produces a flatter distribution (higher variance).
@@ -128,7 +128,8 @@ def generate_smooth_valuation_data(T: int, K: int, M: int = 1, concentration: fl
     target_means: np.ndarray = np.empty((K, M))
     target_means[0] = rng.uniform(0.2, 0.8, size=M)
     for k in range(1, K):
-        step: np.ndarray = rng.normal(0, 0.02, size=M)  # slight change per window
+        step: np.ndarray = rng.normal(
+            0, 0.02, size=M)  # slight change per window
         target_means[k] = np.clip(target_means[k-1] + step, 0.0, 1.0)
     L: int = T // K
     expected_means: np.ndarray = np.zeros((T, M))
@@ -141,4 +142,27 @@ def generate_smooth_valuation_data(T: int, K: int, M: int = 1, concentration: fl
         a = mean * concentration
         b = (1 - mean) * concentration
         valuations[start:end] = rng.beta(a, b, size=(end - start, M))
+    return expected_means, valuations
+
+
+def generate_independent_valuation_data(T: int, M: int = 1, concentration: float = 50,
+                                        rng: Optional[np.random.Generator] = None) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Generate independent valuation data for each time step.
+
+    T: total number of time steps.
+    M: number of products.
+    concentration: concentration parameter for the Beta distribution.
+
+    Each time step draws its target mean independently from a uniform distribution.
+    """
+    rng = rng if rng is not None else np.random.default_rng()
+    # Independently sample target means for each time step
+    expected_means = rng.uniform(0.2, 0.8, size=(T, M))
+    valuations = np.empty((T, M))
+    for t in range(T):
+        mean = expected_means[t]
+        a = mean * concentration
+        b = (1 - mean) * concentration
+        valuations[t] = rng.beta(a, b, size=M)
     return expected_means, valuations

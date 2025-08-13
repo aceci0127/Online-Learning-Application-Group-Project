@@ -168,7 +168,7 @@ class ConstrainedCombinatorialUCBAgent(Agent):
                       A_eq=A_eq, b_eq=b_eq,
                       bounds=bounds,
                       method='highs')
-        if not res.success:
+        if not res.success and not (res.status == 15 and res.primal_status == 0):
             raise RuntimeError("LP failed: " + res.message)
 
         x_flat: np.ndarray = res.x

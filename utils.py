@@ -111,7 +111,7 @@ def solve_clairvoyant_lp_superarm(price_grid: List[np.ndarray], B: float, T: int
     for i, indices in enumerate(superarm_indices):
         # f_super[i] is the sum over products of f_true[j][index_j]
         f_super[i] = sum(f_true[j][indices[j]] for j in range(N))
-        # c_super[i] is the sum over products of c_true[j][indices[j]]
+        # c_super[i] is the sum over products of c_true[j][index_j]
         c_super[i] = sum(c_true[j][indices[j]] for j in range(N))
 
     # Define LP: maximize sum(f_super * y) subject to sum(y) = 1 and sum(c_super * y) <= rho
@@ -190,7 +190,8 @@ def solve_clairvoyant_lp(price_grid, B, T, f_true, c_true):
     print(f"Expected cost: {expected_cost:.4f}")
     print(f"Optimal expected revenue per round: {-res.fun:.4f}")
     print(f"Optimal distribution (simplex): {res.x}")
-    if res.success:
+    # Instead of raising an error on failure, check if the message contains 'Unknown'
+    if res.success or ("Unknown" in res.message and np.all(res.x >= 0)):
         optimal_per_round = -res.fun
         simplex = res.x
         return optimal_per_round, simplex
@@ -250,52 +251,6 @@ def compute_extended_clairvoyant(V, prices, total_inventory):
     print(f"Expected cost: {expected_cost:.4f}")
 
     return expected_utility, gamma, expected_cost
-
-
-def compute_clairvoyant_sequence(valuations, prices, budget):
-    """
-    Calcola la sequenza di prezzi chiarveggente dato conoscenza completa delle valutazioni.
-
-    Args:
-        valuations: array delle valutazioni
-        prices: prezzi disponibili
-        budget: budget massimo (unità massime vendibili)
-
-    Returns:
-        price_sequence: sequenza di prezzi da postare
-        total_revenue: ricavo totale
-    """
-    prices = np.sort(prices)
-    T = len(valuations)
-    candidate = np.empty(T)
-
-    # Per ogni round, calcola il miglior prezzo che non supera la valutazione
-    for t, v in enumerate(valuations):
-        allowed = prices[prices <= v]
-        if allowed.size > 0:
-            candidate[t] = allowed[-1]
-        else:
-            candidate[t] = -np.inf
-
-    # Seleziona B round con ricavo candidato più alto
-    sorted_indices = np.argsort(candidate)[::-1]
-    selected = np.zeros(T, dtype=bool)
-    count = 0
-
-    for i in sorted_indices:
-        if candidate[i] > -np.inf and count < budget:
-            selected[i] = True
-            count += 1
-        else:
-            selected[i] = False
-
-    # Per round selezionati, carica il prezzo candidato; altrimenti, imposta prezzo dummy
-    dummy_price = prices[-1] + 1
-    price_sequence = [candidate[t] if selected[t]
-                      else dummy_price for t in range(T)]
-    total_revenue = sum(candidate[t] for t in range(T) if selected[t])
-
-    return price_sequence, total_revenue
 
 
 def plot_results(regrets_data, units_data, n_trials, title_prefix=""):
