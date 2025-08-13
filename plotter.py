@@ -176,6 +176,3 @@ class StandardAnalyzer:
                 f"Average units sold: {avg_units:.2f}/{result.config.budget} ({100*avg_units/result.config.budget:.1f}%)")
 
         print(f"{'='*60}")
-
-
-print("Plotting and analysis utilities created successfully!")
