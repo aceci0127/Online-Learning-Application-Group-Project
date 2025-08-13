@@ -292,15 +292,15 @@ class ConstrainedCombinatorialUCBAgent(Agent):
         return choice
     '''
     def pull_arm(self) -> Optional[List[int]]:
-        if self.B_rem < 1 or self.t >= self.T:
+        if self.remaining_budget < 1 or self.t >= self.T:
             return None
 
         f_ucb: List[np.ndarray] = []
         c_lcb: List[np.ndarray] = []
         for j in range(self.N):
-            n_j = self.N_pulls[j]
-            f_j = self.avg_f[j]
-            c_j = self.avg_c[j]
+            n_j = self.pull_counts[j]
+            f_j = self.average_rewards[j]
+            c_j = self.average_costs[j]
             # Compute bonus; when not pulled, set bonus high so that option is forced to be selected
             bonus = np.sqrt(
                 self.alpha * np.log(max(self.t, 1)) / np.maximum(1, n_j))
@@ -315,13 +315,13 @@ class ConstrainedCombinatorialUCBAgent(Agent):
 
         # Reconstruct the list of all possible superarms.
         superarm_indices = list(
-            itertools.product(*[range(k) for k in self.Ks]))
+            itertools.product(*[range(k) for k in self.K_list]))
         # Sample one superarm according to distribution y.
         chosen_idx = self.rng.choice(len(y), p=y)
         choice = list(superarm_indices[chosen_idx])
         
         # Update action tracking
-        self.current_choice = choice
+        self.current_action = choice
         self.action_history.append(choice.copy())
         
         return choice
