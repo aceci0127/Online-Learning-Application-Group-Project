@@ -29,13 +29,13 @@ class UCB1(Agent):
         self.T: int = T
         self.range: float = range
         self.rng = np.random.default_rng()
-        
+
         # Standardized variables
         self.current_action: Optional[int] = None
         self.average_rewards: np.ndarray = np.zeros(K)
         self.pull_counts: np.ndarray = np.zeros(K)
         self.t: int = 0
-        
+
         # History tracking
         self.action_history: List[Optional[int]] = []
         self.reward_history: List[float] = []
@@ -47,18 +47,18 @@ class UCB1(Agent):
             ucbs = self.average_rewards + self.range * \
                 np.sqrt(2 * np.log(self.t) / self.pull_counts)
             self.current_action = int(np.argmax(ucbs))
-        
+
         self.action_history.append(self.current_action)
         return int(self.current_action)
 
     def update(self, reward: float) -> None:
         if self.current_action is None:
             return
-            
+
         self.pull_counts[self.current_action] += 1
         self.average_rewards[self.current_action] += (
             reward - self.average_rewards[self.current_action]) / self.pull_counts[self.current_action]
-        
+
         self.reward_history.append(reward)
         self.t += 1
 
@@ -71,7 +71,7 @@ class UCBBudget(Agent):
         self.T: int = T
         self.alpha: float = alpha
         self.rng = np.random.default_rng()
-        
+
         # Standardized variables
         self.current_action: Optional[int] = None
         self.average_rewards: np.ndarray = np.zeros(K)
@@ -82,7 +82,7 @@ class UCBBudget(Agent):
         self.rho: float = B / T
         self.t: int = 0
         self.adaptive_rho: bool = adaptive_rho
-        
+
         # History tracking
         self.action_history: List[Optional[int]] = []
         self.reward_history: List[float] = []
@@ -107,7 +107,7 @@ class UCBBudget(Agent):
 
             gamma_t = self.compute_opt(f_ucbs, c_lcbs)
             self.current_action = int(self.rng.choice(self.K, p=gamma_t))
-        
+
         self.action_history.append(self.current_action)
         return self.current_action
 
@@ -134,13 +134,13 @@ class UCBBudget(Agent):
     def update(self, reward: float, cost: float) -> None:
         if self.current_action is None:
             return
-            
+
         self.pull_counts[self.current_action] += 1
         self.average_rewards[self.current_action] += (reward - self.average_rewards[self.current_action]
-                                 ) / self.pull_counts[self.current_action]
+                                                      ) / self.pull_counts[self.current_action]
         self.average_costs[self.current_action] += (cost - self.average_costs[self.current_action]
-                                 ) / self.pull_counts[self.current_action]
-        
+                                                    ) / self.pull_counts[self.current_action]
+
         self.remaining_budget -= cost
         self.reward_history.append(reward)
         self.cost_history.append(cost)
@@ -157,19 +157,20 @@ class ConstrainedCombinatorialUCBAgent(Agent):
         self.T: int = T
         self.alpha: float = alpha
         self.rng = np.random.default_rng()
-        
-        # Standardized variables
         self.remaining_budget: float = B
         self.initial_budget: float = B
         self.rho: float = B / T
         self.t: int = 0
         self.adaptive_rho: bool = adaptive_rho
-        
+
+        # Pull counts and averages
         self.pull_counts: List[np.ndarray] = [np.zeros(K) for K in self.K_list]
-        self.average_rewards: List[np.ndarray] = [np.zeros(K) for K in self.K_list]
-        self.average_costs: List[np.ndarray] = [np.zeros(K) for K in self.K_list]
+        self.average_rewards: List[np.ndarray] = [
+            np.zeros(K) for K in self.K_list]
+        self.average_costs: List[np.ndarray] = [
+            np.zeros(K) for K in self.K_list]
         self.current_action: List[int] = []
-        
+
         # History tracking
         self.action_history: List[List[int]] = []
         self.reward_history: List[np.ndarray] = []
@@ -318,17 +319,29 @@ class ConstrainedCombinatorialUCBAgent(Agent):
         # Sample one superarm according to distribution y.
         chosen_idx = self.rng.choice(len(y), p=y)
         choice = list(superarm_indices[chosen_idx])
+        
+        # Update action tracking
         self.current_choice = choice
+        self.action_history.append(choice.copy())
+        
         return choice
     '''
 
     def update(self, rewards: np.ndarray, costs: np.ndarray) -> None:
-        for j, idx in enumerate(self.current_choice):
-            self.N_pulls[j][idx] += 1
-            n: float = self.N_pulls[j][idx]
-            self.avg_f[j][idx] += (rewards[j] - self.avg_f[j][idx]) / n
-            self.avg_c[j][idx] += (costs[j] - self.avg_c[j][idx]) / n
-        self.B_rem -= costs.sum()
+        for j, idx in enumerate(self.current_action):
+            self.pull_counts[j][idx] += 1
+            n: float = self.pull_counts[j][idx]
+
+            self.average_rewards[j][idx] += (rewards[j] -
+                                             self.average_rewards[j][idx]) / n
+            self.average_costs[j][idx] += (costs[j] -
+                                           self.average_costs[j][idx]) / n
+
+        self.remaining_budget -= costs.sum()
+
+        self.reward_history.append(rewards.copy())
+        self.cost_history.append(costs.copy())
+
         self.t += 1
 
 
@@ -339,13 +352,13 @@ class HedgeAgent(Agent):
         self.K: int = K
         self.learning_rate: float = learning_rate
         self.rng = np.random.default_rng()
-        
+
         # Standardized variables
         self.weights: np.ndarray = np.ones(K)
         self.probabilities: np.ndarray = np.ones(K) / K
         self.current_action: Optional[int] = None
         self.t: int = 0
-        
+
         # History tracking
         self.action_history: List[Optional[int]] = []
         self.loss_history: List[np.ndarray] = []
@@ -353,7 +366,8 @@ class HedgeAgent(Agent):
 
     def pull_arm(self) -> int:
         self.probabilities = self.weights / np.sum(self.weights)
-        self.current_action = int(self.rng.choice(np.arange(self.K), p=self.probabilities))
+        self.current_action = int(self.rng.choice(
+            np.arange(self.K), p=self.probabilities))
         self.action_history.append(self.current_action)
         return int(self.current_action)
 
@@ -373,18 +387,19 @@ class FFPrimalDualPricingAgent(Agent):
         self.T: int = T
         self.eta: float = eta
         self.rng = np.random.default_rng()
-        
+
         # Standardized variables
         self.remaining_budget: float = B
         self.initial_budget: float = B
         self.rho: float = B / T
         self.lmbd: float = 1.0
         self.t: int = 0
-        
-        self.hedge: HedgeAgent = HedgeAgent(self.K, np.sqrt(np.log(self.K) / T))
+
+        self.hedge: HedgeAgent = HedgeAgent(
+            self.K, np.sqrt(np.log(self.K) / T))
         self.pull_counts: np.ndarray = np.zeros(self.K, int)
         self.current_action: Optional[int] = None
-        
+
         # History tracking
         self.action_history: List[Optional[int]] = []
         self.lmbd_history: List[float] = []
@@ -395,7 +410,7 @@ class FFPrimalDualPricingAgent(Agent):
             self.current_action = None
         else:
             self.current_action = self.hedge.pull_arm()
-        
+
         self.action_history.append(self.current_action)
         return self.current_action
 
@@ -437,18 +452,18 @@ class BanditFeedbackPrimalDual(Agent):
         self.T: int = T
         self.eta: float = 1 / np.sqrt(T)
         self.rng = np.random.default_rng()
-        
+
         # Standardized variables
         self.remaining_budget: float = B
         self.initial_budget: float = B
         self.rho: float = B / T
         self.lmbd: float = 1.0
         self.t: int = 0
-        
+
         self.exp3p: Exp3PAgent = Exp3PAgent(K=self.K, T=self.T, delta=0.05)
         self.pull_counts: np.ndarray = np.zeros(self.K, int)
         self.current_action: Optional[int] = None
-        
+
         # History tracking
         self.action_history: List[Optional[int]] = []
         self.lmbd_history: List[float] = []
@@ -459,7 +474,7 @@ class BanditFeedbackPrimalDual(Agent):
             self.current_action = None
         else:
             self.current_action = self.exp3p.pull_arm()
-        
+
         self.action_history.append(self.current_action)
         return self.current_action
 
@@ -470,7 +485,7 @@ class BanditFeedbackPrimalDual(Agent):
         price_chosen = self.prices[self.current_action]
         cost = 1 if price_chosen <= valuation else 0
         reward = price_chosen * cost
-        
+
         self.remaining_budget -= cost
         self.pull_counts[self.current_action] += 1
 
@@ -488,7 +503,7 @@ class BanditFeedbackPrimalDual(Agent):
         self.exp3p.update(self.current_action, net_norm)
 
         # Update the dual variable lambda
-        self.lmbd = np.clip(self.lmbd - self.eta * (self.rho - cost), 
+        self.lmbd = np.clip(self.lmbd - self.eta * (self.rho - cost),
                             a_min=0.0, a_max=1.0 / self.rho)
         self.lmbd_history.append(self.lmbd)
         self.t += 1
@@ -505,38 +520,40 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
         self.n_products: int = n_products
         self.eta: float = eta
         self.rng = np.random.default_rng()
-        
+
         # Standardized variables
         self.remaining_budget: float = B
         self.initial_budget: float = B
         self.rho: float = B / (n_products * T)
         self.lmbd: float = 1.0
         self.t: int = 0
-        
+
         self.hedges: List[HedgeAgent] = [
             HedgeAgent(self.K, np.sqrt(np.log(self.K) / T))
             for _ in range(n_products)
         ]
         self.current_action: Optional[List[int]] = None
-        
+
         # History tracking
         self.action_history: List[Optional[List[int]]] = []
         self.lmbd_history: List[float] = []
-        self.hedge_prob_history: List[List[np.ndarray]] = [[] for _ in range(n_products)]
+        self.hedge_prob_history: List[List[np.ndarray]] = [
+            [] for _ in range(n_products)]
 
     def pull_arm(self) -> Optional[List[int]]:
         if self.remaining_budget < 1:
             self.current_action = None
         else:
             self.current_action = [hedge.pull_arm() for hedge in self.hedges]
-        
-        self.action_history.append(self.current_action.copy() if self.current_action else None)
+
+        self.action_history.append(
+            self.current_action.copy() if self.current_action else None)
         return self.current_action
 
     def update(self, valuations: np.ndarray) -> None:
         if self.current_action is None:
             return
-            
+
         total_revenue: float = 0.0
         total_units_sold: int = 0
         losses: List[np.ndarray] = []
@@ -579,7 +596,8 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
     def __init__(self, price_grid: List[np.ndarray], B: float, T: int, window_size: int, alpha: float = 2) -> None:
         super().__init__(price_grid, B, T, alpha)
         self.window_size: int = window_size
-        self.samples: List[List[deque]] = [[deque() for _ in range(K)] for K in self.K_list]
+        self.samples: List[List[deque]] = [[deque() for _ in range(K)]
+                                           for K in self.K_list]
 
     def pull_arm(self) -> Optional[List[int]]:
         if self.remaining_budget < 1 or self.t >= self.T:
@@ -615,7 +633,7 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
             bonus[-1] = 0.0
             f_ucb.append(f_j + bonus)
             c_lcb.append(np.clip(c_j - bonus, 0.0, 1.0))
-        
+
         marginals: List[np.ndarray] = self._solve_marginal_lp(f_ucb, c_lcb)
         choice: List[int] = [
             int(self.rng.choice(self.K_list[j], p=marginals[j])) for j in range(self.N)]
@@ -626,10 +644,10 @@ class SlidingWindowConstrainedCombinatorialUCBAgent(ConstrainedCombinatorialUCBA
     def update(self, rewards: np.ndarray, costs: np.ndarray) -> None:
         if not self.current_action:
             return
-            
+
         for j, idx in enumerate(self.current_action):
             self.samples[j][idx].append((self.t, rewards[j], costs[j]))
-        
+
         self.remaining_budget -= costs.sum()
         self.reward_history.append(rewards.copy())
         self.cost_history.append(costs.copy())
@@ -671,7 +689,7 @@ class Exp3PAgent(Agent):
         self.T: int = T
         self.delta: float = delta
         self.rng = np.random.default_rng()
-        
+
         # Standardized variables
         self.eta: float = math.log(K / delta) / (T * K)
         self.gamma: float = 0.95 * math.log(K) / (T * K)
@@ -680,7 +698,7 @@ class Exp3PAgent(Agent):
         self.probabilities: np.ndarray = np.ones(K) / K
         self.current_action: Optional[int] = None
         self.t: int = 0
-        
+
         # History tracking
         self.action_history: List[Optional[int]] = []
         self.reward_history: List[float] = []
@@ -694,7 +712,8 @@ class Exp3PAgent(Agent):
 
     def pull_arm(self) -> int:
         self.probabilities = self._compute_probs()
-        self.current_action = int(self.rng.choice(self.K, p=self.probabilities))
+        self.current_action = int(
+            self.rng.choice(self.K, p=self.probabilities))
         self.action_history.append(self.current_action)
         return self.current_action
 
@@ -704,7 +723,7 @@ class Exp3PAgent(Agent):
                 self.G[i] += self.beta / self.probabilities[i]
             else:
                 self.G[i] += (reward + self.beta) / self.probabilities[i]
-        
+
         self.reward_history.append(reward)
         self.weight_history.append(self.G.copy())
         self.t += 1
@@ -728,18 +747,20 @@ class MultiProductPDExp3PricingAgent(Agent):
         self.n_products: int = n_products
         self.delta: float = delta
         self.rng = np.random.default_rng()
-        
+
         # Standardized variables
         self.remaining_budget: float = B
         self.initial_budget: float = B
         self.rho: float = B / (n_products * T)
-        self.eta: float = eta if eta is not None else 1 / math.sqrt(n_products * T)
+        self.eta: float = eta if eta is not None else 1 / \
+            math.sqrt(n_products * T)
         self.lmbd: float = 1.0
         self.t: int = 0
-        
-        self.exp3p_agents: List[Exp3PAgent] = [Exp3PAgent(self.K, T, delta) for _ in range(n_products)]
+
+        self.exp3p_agents: List[Exp3PAgent] = [
+            Exp3PAgent(self.K, T, delta) for _ in range(n_products)]
         self.current_action: Optional[List[int]] = None
-        
+
         # History tracking
         self.action_history: List[Optional[List[int]]] = []
         self.lmbd_history: List[float] = []
@@ -748,19 +769,21 @@ class MultiProductPDExp3PricingAgent(Agent):
         if self.remaining_budget < 1:
             self.current_action = None
         else:
-            self.current_action = [agent.pull_arm() for agent in self.exp3p_agents]
-        
-        self.action_history.append(self.current_action.copy() if self.current_action else None)
+            self.current_action = [agent.pull_arm()
+                                   for agent in self.exp3p_agents]
+
+        self.action_history.append(
+            self.current_action.copy() if self.current_action else None)
         return self.current_action
 
     def update(self, valuations: np.ndarray) -> None:
         if self.current_action is None:
             return
-            
+
         total_revenue: float = 0.0
         total_sales: int = 0
         p_max: float = self.prices.max()
-        
+
         for j, agent in enumerate(self.exp3p_agents):
             choice: int = self.current_action[j]
             price: float = self.prices[choice]
