@@ -114,29 +114,12 @@ class StandardExperimentRunner:
                     print(
                         f"Trial {trial+1}: Agent stopped at round {t}.", end=" ")
                     flag = True
-
-                # Fallback action:
-                # - se multi-prodotto, usa la lunghezza di price_grid[0] quando disponibile,
-                #   altrimenti prices;
-                # - se singolo prodotto, idem ma con indici scalari.
+                # Ensure action is a list in multi-product cases
                 if self.config.n_products > 1:
-                    if hasattr(self.env, "price_grid"):
-                        action = [len(self.env.price_grid[0]) -
-                                  1] * self.config.n_products
-                    elif hasattr(self.env, "prices"):
-                        action = [len(self.env.prices) - 1] * \
-                            self.config.n_products
-                    else:
-                        raise AttributeError(
-                            "Environment has neither 'price_grid' nor 'prices'.")
+                    action = [len(self.env.price_grid[0]) - 1] * \
+                        self.config.n_products
                 else:
-                    if hasattr(self.env, "price_grid"):
-                        action = len(self.env.price_grid) - 1
-                    elif hasattr(self.env, "prices"):
-                        action = len(self.env.prices) - 1
-                    else:
-                        raise AttributeError(
-                            "Environment has neither 'price_grid' nor 'prices'.")
+                    action = len(self.env.price_grid) - 1
 
             env_result = self.env.round(action)
 
@@ -363,7 +346,7 @@ class MultiDistributionRunner:
 
     def print_analysis(self):
         """Print detailed analysis for all distributions"""
-        print("\n=== ANALISI DETTAGLIATA ===")
+        print(f"\n=== ANALISI DETTAGLIATA ===")
         for name, result in self.results.items():
             print(f"\n--- Distribuzione {name} ---")
             from plotter import StandardAnalyzer
@@ -374,7 +357,7 @@ class MultiDistributionRunner:
                     f"Empirical average rewards: {np.round(result.final_agents[0].average_rewards, 4)}")
 
         # Confronto finale
-        print("\n=== CONFRONTO FINALE ===")
+        print(f"\n=== CONFRONTO FINALE ===")
         for name, result in self.results.items():
             final_regret = np.mean([regrets[-1]
                                    for regrets in result.regrets if regrets])
@@ -406,3 +389,6 @@ class MultiDistributionRunner:
                     )
             except Exception as e:
                 print(f"Errore nel plottare arm distribution per {name}: {e}")
+
+
+print("Experiment framework created successfully!")

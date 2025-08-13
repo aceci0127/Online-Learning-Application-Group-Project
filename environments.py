@@ -1,5 +1,6 @@
 import numpy as np
 from abc import ABC, abstractmethod
+from scipy.stats import beta
 from typing import List, Optional, Tuple, Union
 from data_generators import (
     generate_beta_valuations,
@@ -36,10 +37,6 @@ class PricingEnvironment(Environment):
             self.valuations: np.ndarray = self._rng.beta(0.5, 2, size=T)
         elif distribution == Distribution.UNIFORM:
             self.valuations = self._rng.uniform(0, 1, size=T)
-        elif distribution == Distribution.NORMAL:
-            # Generate normal distribution with mean=0.5 and std=0.15, truncated to [0,1]
-            self.valuations = np.clip(
-                self._rng.normal(0.5, 0.15, size=T), 0, 1)
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 
@@ -66,9 +63,6 @@ class BudgetedPricingEnvironment(Environment):
             self.vals: np.ndarray = self._rng.beta(2, 5, size=T)
         elif distribution == Distribution.UNIFORM:
             self.vals = self._rng.uniform(0, 1, size=T)
-        elif distribution == Distribution.NORMAL:
-            # Generate normal distribution with mean=0.5 and std=0.15, truncated to [0,1]
-            self.vals = np.clip(self._rng.normal(0.5, 0.15, size=T), 0, 1)
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 
@@ -143,10 +137,6 @@ class MultiProductPricingEnvironment(Environment):
         elif distribution == Distribution.BETA:
             # self.vals = self.rng.beta(0.5, 2, size=(T, self.N))
             self.vals = self.rng.beta(5, 10, size=(T, self.N))
-        elif distribution == Distribution.NORMAL:
-            # Generate normal distribution with mean=0.5 and std=0.15, truncated to [0,1]
-            self.vals = np.clip(self.rng.normal(
-                0.5, 0.15, size=(T, self.N)), 0, 1)
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 
