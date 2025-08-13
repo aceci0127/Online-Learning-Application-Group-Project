@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from runner import ExperimentResult
 from numpy.typing import NDArray
-from numpy.typing import NDArray
 from typing import List, Dict, Any
 
 

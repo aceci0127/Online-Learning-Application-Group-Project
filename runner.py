@@ -359,7 +359,7 @@ class MultiDistributionRunner:
 
     def print_analysis(self):
         """Print detailed analysis for all distributions"""
-        print(f"\n=== ANALISI DETTAGLIATA ===")
+        print("\n=== ANALISI DETTAGLIATA ===")
         for name, result in self.results.items():
             print(f"\n--- Distribuzione {name} ---")
             from plotter import StandardAnalyzer
@@ -370,7 +370,7 @@ class MultiDistributionRunner:
                     f"Empirical average rewards: {np.round(result.final_agents[0].average_rewards, 4)}")
 
         # Confronto finale
-        print(f"\n=== CONFRONTO FINALE ===")
+        print("\n=== CONFRONTO FINALE ===")
         for name, result in self.results.items():
             final_regret = np.mean([regrets[-1]
                                    for regrets in result.regrets if regrets])

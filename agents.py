@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from scipy.optimize import linprog
 from collections import deque
 import math as math
-from typing import List, Tuple, Optional, Union
+from typing import Union
 import numpy as np
 
 

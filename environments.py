@@ -1,6 +1,5 @@
 import numpy as np
 from abc import ABC, abstractmethod
-from scipy.stats import beta
 from typing import List, Optional, Tuple, Union
 from data_generators import (
     generate_beta_valuations,

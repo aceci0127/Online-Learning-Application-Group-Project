@@ -1,7 +1,5 @@
 import numpy as np
-from scipy.stats import beta, truncnorm
-from collections import deque
-from typing import List, Optional, Tuple, Any
+from typing import Optional, Tuple
 
 
 def pattern(t: int, T: int, freq: float) -> float:
