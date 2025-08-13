@@ -111,15 +111,28 @@ class StandardExperimentRunner:
             action = self.agent.pull_arm()
             if action is None:
                 if not flag:
-                    print(
-                        f"Trial {trial+1}: Agent stopped at round {t}.", end=" ")
+                    print(f"Trial {trial+1}: Agent stopped at round {t}.", end=" ")
                     flag = True
-                # Ensure action is a list in multi-product cases
+
+                # Fallback action:
+                # - se multi-prodotto, usa la lunghezza di price_grid[0] quando disponibile,
+                #   altrimenti prices;
+                # - se singolo prodotto, idem ma con indici scalari.
                 if self.config.n_products > 1:
-                    action = [len(self.env.price_grid[0]) - 1] * \
-                        self.config.n_products
+                    if hasattr(self.env, "price_grid"):
+                        action = [len(self.env.price_grid[0]) - 1] * self.config.n_products
+                    elif hasattr(self.env, "prices"):
+                        action = [len(self.env.prices) - 1] * self.config.n_products
+                    else:
+                        raise AttributeError("Environment has neither 'price_grid' nor 'prices'.")
                 else:
-                    action = len(self.env.price_grid) - 1
+                    if hasattr(self.env, "price_grid"):
+                        action = len(self.env.price_grid) - 1
+                    elif hasattr(self.env, "prices"):
+                        action = len(self.env.prices) - 1
+                    else:
+                        raise AttributeError("Environment has neither 'price_grid' nor 'prices'.")
+
 
             env_result = self.env.round(action)
 
