@@ -222,7 +222,9 @@ class MultiDistributionRunner:
             elif dist == Distribution.PIECEWISE_SINUSOIDAL:
                 distribution_names.append("Piecewise Sinusoidal")
             elif dist == Distribution.SMOOTH_SIMILAR_STEP:
-                distribution_names.append("Smooth")
+                distribution_names.append("Smooth Similar")
+            elif dist == Distribution.SMOOTH_INDEPENDENT_STEP:
+                distribution_names.append("Independent")
             else:
                 distribution_names.append(str(dist))
 

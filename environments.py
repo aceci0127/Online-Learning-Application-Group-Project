@@ -149,7 +149,7 @@ class MultiProductPricingEnvironment(Environment):
         elif distribution == Distribution.NORMAL:
             # Generate normal distribution with mean=0.3 and std=0.1, truncated to [0,1]
             self.vals = np.clip(self.rng.normal(
-                0.3, 0.1, size=(T, self.N)), 0, 1)
+                0.4, 0.1, size=(T, self.N)), 0, 1)
         else:
             raise ValueError(f"Unsupported distribution: {distribution}")
 
@@ -233,7 +233,7 @@ class SmoothMultiProductPricingEnvironment:
             )
         elif distribution == Distribution.SMOOTH_INDEPENDENT_STEP:
             self.expected_means, self.valuations = generate_independent_valuation_data(
-                T, M=self.n_products, concentration=50, rng=self.rng
+                T, K=self.num_windows, M=self.n_products, concentration=50, rng=self.rng
             )
 
         else:

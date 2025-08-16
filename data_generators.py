@@ -52,20 +52,6 @@ def generate_piecewise_beta_valuations(T: int, shock_prob: float, num_regimes: i
     return valuations
 
 
-def generate_stationary_correlated_gauss(T: int, m: int, mu: float, sigma: float, rho: float, rng: Optional[np.random.Generator] = None) -> Tuple[np.ndarray, np.ndarray]:
-    """Generate stationary correlated Gaussian valuations"""
-    rng = rng or np.random.default_rng(0)
-    # Build the constant correlation matrix
-    R: np.ndarray = np.eye(m) + (1 - np.eye(m)) * rho
-    # Calculate the covariance matrix using sigma
-    Sigma: np.ndarray = np.diag([sigma] * m) @ R @ np.diag([sigma] * m)
-    # Generate T samples from the multivariate normal distribution
-    V: np.ndarray = rng.multivariate_normal(mean=[mu] * m, cov=Sigma, size=T)
-    V = np.clip(V, 0, 1)  # Ensure valuations are in [0, 1]
-    R_ts: np.ndarray = np.repeat(R[np.newaxis, :, :], T, axis=0)
-    return V, R_ts
-
-
 def generate_simple_tv_mv_gauss(T: int, m: int, mu0: float, A: float, f: float, phi: float, sigma0: float, A_sigma: float, phi_sigma: float, rho0: float, rng: Optional[np.random.Generator] = None) -> Tuple[np.ndarray, np.ndarray]:
     """Generate time-varying multivariate Gaussian valuations with sinusoidal modulation"""
     rng = rng or np.random.default_rng(0)
@@ -126,11 +112,11 @@ def generate_smooth_valuation_data(T: int, K: int, M: int = 1, concentration: fl
     """
     rng = rng if rng is not None else np.random.default_rng()
     target_means: np.ndarray = np.empty((K, M))
-    target_means[0] = rng.uniform(0.2, 0.8, size=M)
+    target_means[0] = rng.uniform(0.2, 0.5, size=M)
     for k in range(1, K):
         step: np.ndarray = rng.normal(
-            0, 0.02, size=M)  # slight change per window
-        target_means[k] = np.clip(target_means[k-1] + step, 0.0, 1.0)
+            0.01, 0.04, size=M)  # slight change per window
+        target_means[k] = np.clip(target_means[k-1] + step, 0.2, 1.0)
     L: int = T // K
     expected_means: np.ndarray = np.zeros((T, M))
     valuations: np.ndarray = np.zeros((T, M))
@@ -145,24 +131,32 @@ def generate_smooth_valuation_data(T: int, K: int, M: int = 1, concentration: fl
     return expected_means, valuations
 
 
-def generate_independent_valuation_data(T: int, M: int = 1, concentration: float = 50,
+def generate_independent_valuation_data(T: int, K: int, M: int = 1, concentration: float = 200,
                                         rng: Optional[np.random.Generator] = None) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Generate independent valuation data for each time step.
+    Generate valuation data using piecewise constant Beta distributions for each window.
 
     T: total number of time steps.
+    K: number of windows.
     M: number of products.
     concentration: concentration parameter for the Beta distribution.
 
-    Each time step draws its target mean independently from a uniform distribution.
+    For each window, a target mean is drawn independently from a uniform distribution,
+    and the entire window uses the corresponding Beta distribution parameters.
     """
     rng = rng if rng is not None else np.random.default_rng()
-    # Independently sample target means for each time step
-    expected_means = rng.uniform(0.2, 0.8, size=(T, M))
-    valuations = np.empty((T, M))
-    for t in range(T):
-        mean = expected_means[t]
+    L: int = T // K
+    expected_means: np.ndarray = np.empty((T, M))
+    valuations: np.ndarray = np.empty((T, M))
+
+    for k in range(K):
+        start: int = k * L
+        end: int = T if k == K - 1 else (k + 1) * L
+        # Independently sample the target mean for the entire window
+        mean = rng.uniform(0.2, 0.6, size=M)
+        expected_means[start:end] = mean
         a = mean * concentration
         b = (1 - mean) * concentration
-        valuations[t] = rng.beta(a, b, size=M)
+        valuations[start:end] = rng.beta(a, b, size=(end - start, M))
+
     return expected_means, valuations
