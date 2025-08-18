@@ -225,15 +225,16 @@ class SmoothMultiProductPricingEnvironment:
         self.n_products: int = n_products
         self.num_windows: int = num_windows
         self.distribution: Distribution = distribution
+        self.concentration: float = 50.0
 
         if distribution == Distribution.SMOOTH_SIMILAR_STEP:
             self.expected_means, self.valuations = generate_smooth_valuation_data(
                 T, K=self.num_windows, M=self.n_products,
-                concentration=50, rng=self.rng
+                concentration=self.concentration, rng=self.rng
             )
         elif distribution == Distribution.SMOOTH_INDEPENDENT_STEP:
             self.expected_means, self.valuations = generate_independent_valuation_data(
-                T, K=self.num_windows, M=self.n_products, concentration=50, rng=self.rng
+                T, K=self.num_windows, M=self.n_products, concentration=self.concentration, rng=self.rng
             )
 
         else:

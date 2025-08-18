@@ -186,10 +186,17 @@ def solve_clairvoyant_lp(price_grid, B, T, f_true, c_true):
     res = linprog(c=c_obj, A_ub=A_ub, b_ub=b_ub,
                   A_eq=A_eq, b_eq=b_eq, bounds=bounds,
                   method='highs')
+    if not res.success or res.x is None:
+        raise ValueError(f"LP did not solve successfully: {res.message}")
     expected_cost = np.sum(c_flat * res.x)
     print(f"Expected cost: {expected_cost:.4f}")
     print(f"Optimal expected revenue per round: {-res.fun:.4f}")
+    # Print optimal distribution (simplex) with full precision, no scientific notation
+    np.set_printoptions(suppress=True, precision=6)
     print(f"Optimal distribution (simplex): {res.x}")
+    # Optionally, reset print options if needed elsewhere
+    # np.set_printoptions(suppress=False)
+    print(f"f_true: {f_true}")
     # Instead of raising an error on failure, check if the message contains 'Unknown'
     if res.success or ("Unknown" in res.message and np.all(res.x >= 0)):
         optimal_per_round = -res.fun

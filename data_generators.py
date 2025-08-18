@@ -135,14 +135,8 @@ def generate_independent_valuation_data(T: int, K: int, M: int = 1, concentratio
                                         rng: Optional[np.random.Generator] = None) -> Tuple[np.ndarray, np.ndarray]:
     """
     Generate valuation data using piecewise constant Beta distributions for each window.
-
-    T: total number of time steps.
-    K: number of windows.
-    M: number of products.
-    concentration: concentration parameter for the Beta distribution.
-
-    For each window, a target mean is drawn independently from a uniform distribution,
-    and the entire window uses the corresponding Beta distribution parameters.
+    Now with increased differences between windows by varying both the target mean range
+    and the concentration parameter per window.
     """
     rng = rng if rng is not None else np.random.default_rng()
     L: int = T // K
@@ -152,11 +146,14 @@ def generate_independent_valuation_data(T: int, K: int, M: int = 1, concentratio
     for k in range(K):
         start: int = k * L
         end: int = T if k == K - 1 else (k + 1) * L
-        # Independently sample the target mean for the entire window
-        mean = rng.uniform(0.2, 0.6, size=M)
+        # Sample target means from the full [0, 1] range for more variability
+        mean = rng.uniform(0.2, 0.9, size=M)
+        # Randomize the concentration parameter for each window (e.g., ±50% variability)
+        window_concentration = concentration * \
+            rng.uniform(0.5, 1.5, size=M)
         expected_means[start:end] = mean
-        a = mean * concentration
-        b = (1 - mean) * concentration
+        a = mean * window_concentration
+        b = (1 - mean) * window_concentration
         valuations[start:end] = rng.beta(a, b, size=(end - start, M))
 
     return expected_means, valuations

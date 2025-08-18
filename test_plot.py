@@ -6,7 +6,7 @@ from data_generators import generate_smooth_valuation_data, generate_independent
 def main():
     T = 20000           # total number of time steps
     K = 5              # number of windows
-    M = 1              # number of products; adjust if needed
+    M = 3              # number of products; adjust if needed
     concentration = 50
     trial_seed = 18
     rng = np.random.default_rng(trial_seed)
