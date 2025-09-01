@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 def compute_expected_revenues(prices, mu=0.8, sigma=0.2, lower=0., upper=1.):
     """
-    Calcola E[p * 1{V>=p}] per V ~ TruncNorm(mu, sigma^2) su [lower, upper].
+    Compute E[p * 1{V>=p}] for V ~ TruncNorm(mu, sigma^2) on [lower, upper].
     """
     a, b = (lower - mu) / sigma, (upper - mu) / sigma
     dist = truncnorm(a, b, loc=mu, scale=sigma)
@@ -23,18 +23,18 @@ def compute_expected_revenues(prices, mu=0.8, sigma=0.2, lower=0., upper=1.):
 
 def compute_clairvoyant_single_product(prices, sell_probabilities, budget, horizon):
     """
-    Calcola la soluzione chiarveggente per singolo prodotto usando LP.
+    Compute clairvoyant solution for single product using LP.
 
     Args:
-        prices: array dei prezzi disponibili
-        sell_probabilities: probabilità di vendita per ogni prezzo
-        budget: budget totale
-        horizon: orizzonte temporale
+        prices: array of available prices
+        sell_probabilities: selling probability for each price
+        budget: total budget
+        horizon: time horizon
 
     Returns:
-        expected_utility: utilità attesa per round
-        gamma: distribuzione ottimale sui prezzi
-        expected_cost: costo atteso per round
+        expected_utility: expected utility per round
+        gamma: optimal distribution over prices
+        expected_cost: expected cost per round
     """
     rho = budget / horizon
 
@@ -47,7 +47,7 @@ def compute_clairvoyant_single_product(prices, sell_probabilities, budget, horiz
     res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=(0, 1))
 
     if not res.success:
-        raise ValueError("LP fallito: " + res.message)
+        raise ValueError("LP failed: " + res.message)
 
     gamma = res.x
     expected_utility = -res.fun
@@ -61,14 +61,14 @@ def compute_clairvoyant_single_product(prices, sell_probabilities, budget, horiz
 
 def compute_sell_probabilities_multi(V, prices):
     """
-    Calcola le probabilità di vendita per più prodotti.
+    Compute selling probabilities for multiple products.
 
     Args:
-        V: array di valutazioni (T, m)
-        prices: array dei prezzi
+        V: array of valuations (T, m)
+        prices: array of prices
 
     Returns:
-        s: matrice delle probabilità di vendita (m, K)
+        s: matrix of selling probabilities (m, K)
     """
     T_env, m_env = V.shape
     K = len(prices)
@@ -197,7 +197,7 @@ def solve_clairvoyant_lp(price_grid, B, T, f_true, c_true):
     # Optionally, reset print options if needed elsewhere
     # np.set_printoptions(suppress=False)
     print(f"f_true: {f_true}")
-    # Instead of raising an error on failure, check if the message contains 'Unknown'
+    # Check if LP solved successfully or with unknown status but valid solution
     if res.success or ("Unknown" in res.message and np.all(res.x >= 0)):
         optimal_per_round = -res.fun
         simplex = res.x
@@ -226,7 +226,7 @@ def compute_extended_clairvoyant(V, prices, total_inventory):
 
     s = compute_sell_probabilities_multi(V, prices)
 
-    # Appiattisce variabili nella formulazione LP
+    # Flatten variables in LP formulation
     c = -(np.tile(prices, m_env) * s.flatten())
     A_ub = np.array([s.flatten()])
     b_ub = np.array([pacing_rate])
@@ -248,7 +248,7 @@ def compute_extended_clairvoyant(V, prices, total_inventory):
                   bounds=bounds, method="highs")
 
     if not res.success:
-        raise ValueError("LP fallito: " + res.message)
+        raise ValueError("LP failed: " + res.message)
 
     gamma = res.x.reshape((m_env, K))
     expected_utility = -res.fun
@@ -262,13 +262,13 @@ def compute_extended_clairvoyant(V, prices, total_inventory):
 
 def plot_results(regrets_data, units_data, n_trials, title_prefix=""):
     """
-    Crea grafici per i risultati degli esperimenti.
+    Create plots for experiment results.
 
     Args:
-        regrets_data: dati del regret cumulativo
-        units_data: dati delle unità vendute cumulative
-        n_trials: numero di trial
-        title_prefix: prefisso per i titoli
+        regrets_data: cumulative regret data
+        units_data: cumulative units sold data
+        n_trials: number of trials
+        title_prefix: prefix for titles
     """
     min_rounds = min(len(reg) for reg in regrets_data)
     regrets_arr = np.array([reg[:min_rounds] for reg in regrets_data])
@@ -282,28 +282,28 @@ def plot_results(regrets_data, units_data, n_trials, title_prefix=""):
 
     plt.figure(figsize=(12, 4))
 
-    # Plot regret cumulativo
+    # Plot cumulative regret
     plt.subplot(1, 2, 1)
-    plt.plot(avg_regret, label="Regret Cumulativo Medio")
+    plt.plot(avg_regret, label="Average Cumulative Regret")
     plt.fill_between(np.arange(min_rounds),
                      avg_regret - se_regret,
                      avg_regret + se_regret,
                      alpha=0.3, label="±1 SE")
     plt.xlabel("Round")
-    plt.ylabel("Regret Cumulativo")
-    plt.title(f"{title_prefix}Regret Cumulativo")
+    plt.ylabel("Cumulative Regret")
+    plt.title(f"{title_prefix}Cumulative Regret")
     plt.legend()
 
-    # Plot unità vendute cumulative
+    # Plot cumulative units sold
     plt.subplot(1, 2, 2)
-    plt.plot(avg_units, label="Unità Vendute Cumulative Medie")
+    plt.plot(avg_units, label="Average Cumulative Units Sold")
     plt.fill_between(np.arange(min_rounds),
                      avg_units - se_units,
                      avg_units + se_units,
                      alpha=0.3, label="±1 SE")
     plt.xlabel("Round")
-    plt.ylabel("Unità Vendute Cumulative")
-    plt.title(f"{title_prefix}Unità Vendute Cumulative")
+    plt.ylabel("Cumulative Units Sold")
+    plt.title(f"{title_prefix}Cumulative Units Sold")
     plt.legend()
 
     plt.tight_layout()
@@ -314,38 +314,38 @@ def plot_results(regrets_data, units_data, n_trials, title_prefix=""):
 
 def print_final_results(avg_regret, avg_units, min_rounds, final_rewards, agent=None):
     """
-    Stampa i risultati finali dell'esperimento.
+    Print final experiment results.
 
     Args:
-        avg_regret: regret medio
-        avg_units: unità medie vendute
-        min_rounds: numero minimo di round
-        final_rewards: ricavi finali
-        agent: agente (opzionale, per statistiche aggiuntive)
+        avg_regret: average regret
+        avg_units: average units sold
+        min_rounds: minimum number of rounds
+        final_rewards: final rewards
+        agent: agent (optional, for additional statistics)
     """
-    print(f"\nRisultati Finali:")
-    print(f"Regret medio per round: {avg_regret[-1]/min_rounds:.4f}")
-    print(f"Unità vendute cumulative medie: {avg_units[-1]:.2f}")
+    print(f"\nFinal Results:")
+    print(f"Average regret per round: {avg_regret[-1]/min_rounds:.4f}")
+    print(f"Average cumulative units sold: {avg_units[-1]:.2f}")
 
     if final_rewards:
         final_rewards = np.array(final_rewards)
-        print(f"Ricavo cumulativo medio: {np.mean(final_rewards):.2f}")
+        print(f"Average cumulative revenue: {np.mean(final_rewards):.2f}")
 
     if agent and hasattr(agent, 'N_pulls'):
-        print(f"Conteggi pull: {agent.N_pulls}")
+        print(f"Pull counts: {agent.N_pulls}")
     elif agent and hasattr(agent, 'pull_counts'):
-        print(f"Conteggi pull: {agent.pull_counts}")
+        print(f"Pull counts: {agent.pull_counts}")
 
 
 def create_default_prices() -> NDArray[np.float64]:
-    """Crea array di prezzi di default per gli esperimenti"""
+    """Create default price array for experiments"""
     return np.array([0.2, 0.256, 0.311, 0.367, 0.422, 0.478,
                      0.553, 0.589, 0.644, 0.7, 0.756, 0.811,
                      0.867, 0.922, 0.98, 1.001])
 
 
 def create_simple_prices() -> NDArray[np.float64]:
-    """Crea array di prezzi semplice per esperimenti base"""
+    """Create simple price array for basic experiments"""
     return np.array([0.1, 0.2, 0.3, 0.5, 0.7, 0.8])
 
 

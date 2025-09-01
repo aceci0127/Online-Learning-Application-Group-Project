@@ -204,14 +204,14 @@ class MultiProductBudgetedPricingEnvironment(Environment):
                 T, n_products, num_regimes, rng=self.rng)
         else:
             raise ValueError(
-                f"Tipo di valutazione non supportato: {distribution}")
+                f"Unsupported valuation type: {distribution}")
 
     def round(self, round: int) -> np.ndarray:
         if self.t >= self.T:
-            raise RuntimeError("Orizzonte temporale superato!")
-        v_t: np.ndarray = self.valuations[self.t]
+            raise RuntimeError("Time horizon exceeded")
+        valuation_t: np.ndarray = self.valuations[self.t]
         self.t += 1
-        return v_t
+        return valuation_t
 
 
 class SmoothMultiProductPricingEnvironment:

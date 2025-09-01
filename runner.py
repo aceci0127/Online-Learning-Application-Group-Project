@@ -232,7 +232,7 @@ class MultiDistributionRunner:
 
         # Run experiment for each distribution
         for dist, name in zip(distributions, distribution_names):
-            print(f"\n=== Eseguendo esperimento con distribuzione {name} ===")
+            print(f"\n=== Running experiment with {name} distribution ===")
 
             single_config = ExperimentConfig(
                 task_name=f"{self.config.task_name} ({name})",
@@ -251,7 +251,7 @@ class MultiDistributionRunner:
             result = runner.run_experiment()
             self.results[name] = result
 
-            print(f"Esperimento {name} completato")
+            print(f"Experiment {name} completed")
 
         return self.results
 
@@ -259,7 +259,7 @@ class MultiDistributionRunner:
         """Plot comparison of all distributions using the same style as StandardPlotter"""
 
         if not self.results:
-            print("Nessun risultato da plottare. Esegui prima run_experiment().")
+            print("No results to plot. Run experiment first.")
             return
 
         # Find minimum length across all trials and distributions
@@ -350,9 +350,9 @@ class MultiDistributionRunner:
 
     def print_analysis(self):
         """Print detailed analysis for all distributions"""
-        print(f"\n=== ANALISI DETTAGLIATA ===")
+        print(f"\n=== DETAILED ANALYSIS ===")
         for name, result in self.results.items():
-            print(f"\n--- Distribuzione {name} ---")
+            print(f"\n--- Distribution {name} ---")
             from plotter import StandardAnalyzer
             analysis = StandardAnalyzer.analyze_results(result)
             StandardAnalyzer.print_analysis(result, analysis)
@@ -360,8 +360,8 @@ class MultiDistributionRunner:
                 print(
                     f"Empirical average rewards: {np.round(result.final_agents[0].average_rewards, 4)}")
 
-        # Confronto finale
-        print(f"\n=== CONFRONTO FINALE ===")
+        # Final comparison
+        print(f"\n=== FINAL COMPARISON ===")
         for name, result in self.results.items():
             final_regret = np.mean([regrets[-1]
                                    for regrets in result.regrets if regrets])
@@ -385,14 +385,14 @@ class MultiDistributionRunner:
                         f"Arm Distribution - {name}"
                     )
                 else:
-                    # Singolo prodotto
+                    # Single product
                     StandardPlotter.plot_arm_distribution(
                         result.final_agents[0],
                         self.config.prices,
                         f"Arm Distribution - {name}"
                     )
             except Exception as e:
-                print(f"Errore nel plottare arm distribution per {name}: {e}")
+                print(f"Error plotting arm distribution for {name}: {e}")
 
 
 print("Experiment framework created successfully!")
